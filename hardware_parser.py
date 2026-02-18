@@ -114,6 +114,7 @@ class HardwareScheduleParser:
         'SAR', 'DOR', 'BES', 'HAG', 'STA', 'TRI', 'ROC',
         'ADA', 'PRE', 'RCI', 'NGP', 'REE', 'NOR', 'FAL',
         'RKW', 'CAL', 'KAB', 'PEM', 'PDQ', 'YAL',
+        'DET', 'LGR',  # Detex, Securitron (alt finish code)
     }
 
     MFR_PATTERN = re.compile(r'\s+(\S+)\s+([A-Z]{2,4})\s*$')
@@ -193,21 +194,47 @@ class HardwareScheduleParser:
         sets = {}
         text = self._rejoin_wrapped_headings(text)
 
+        # Try Format 1: "HEADING # XX - (DESCRIPTION)"
         heading_pattern = r'HEADING\s*#\s*(\d+)\s*-\s*\(([^)]+)\)'
         matches = list(re.finditer(heading_pattern, text))
 
-        for i, match in enumerate(matches):
-            set_num = match.group(1).lstrip('0') or '0'
-            description = re.sub(r'\s+', ' ', match.group(2).strip())
+        if matches:
+            self._log(f"Detected format: HEADING # (found {len(matches)} sets)")
+            for i, match in enumerate(matches):
+                set_num = match.group(1).lstrip('0') or '0'
+                description = re.sub(r'\s+', ' ', match.group(2).strip())
+                start = match.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                content = text[start:end]
+                hw_set = self._parse_single_set(set_num, description, content)
+                sets[set_num] = hw_set
+                self._log(f"Set #{set_num}: {len(hw_set.components)} components")
+            return sets
 
-            start = match.end()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            content = text[start:end]
+        # Try Format 2: "Hardware Group No. XX"
+        group_pattern = r'Hardware\s+Group\s+No\.\s*(\d+)'
+        matches = list(re.finditer(group_pattern, text, re.IGNORECASE))
 
-            hw_set = self._parse_single_set(set_num, description, content)
-            sets[set_num] = hw_set
-            self._log(f"Set #{set_num}: {len(hw_set.components)} components")
+        if matches:
+            self._log(f"Detected format: Hardware Group No. (found {len(matches)} sets)")
+            for i, match in enumerate(matches):
+                set_num = match.group(1).lstrip('0') or '0'
+                start = match.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                content = text[start:end]
 
+                # Extract description from "For use on Door #(s):" line
+                door_ref_match = re.search(r'For\s+use\s+on\s+Door\s*#?\(s\)\s*:\s*\n?\s*(.+?)(?:\n|$)', content, re.IGNORECASE)
+                door_refs = door_ref_match.group(1).strip() if door_ref_match else ''
+                description = f"Doors: {door_refs}" if door_refs else ""
+
+                hw_set = self._parse_single_set(set_num, description, content)
+                sets[set_num] = hw_set
+                self._log(f"Set #{set_num}: {len(hw_set.components)} components - {description}")
+            return sets
+
+        # Try Format 3: Generic fallback - look for numbered sections with QTY EA patterns
+        self._log("No standard format detected, trying generic pattern match")
         return sets
 
     def _rejoin_wrapped_headings(self, text: str) -> str:

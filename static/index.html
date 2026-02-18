@@ -731,7 +731,7 @@ async function handleFpFile(file) {
           html += `<div class="alert alert-error" style="margin-top:8px"><strong>On schedule but NOT on floor plan:</strong> ${c.on_schedule_not_plan.join(', ')}</div>`;
         }
         if (c.on_plan_not_schedule.length > 0) {
-          html += `<div class="alert alert-warning" style="margin-top:8px"><strong>On floor plan but NOT on schedule:</strong> ${c.on_plan_not_schedule.join(', ')}</div>`;
+          html += `<div class="alert alert-info" style="margin-top:8px"><strong>On floor plan but not on schedule (likely room numbers):</strong> ${c.on_plan_not_schedule.join(', ')}</div>`;
         }
         if (c.matched_count > 0) {
           html += `<div style="font-size:12px;color:#666;margin-top:4px">${c.matched_count} doors matched</div>`;
