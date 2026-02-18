@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Door Review Tool</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #777;
+    --border: #e0e0e0;
+    --border-light: #f0f0f0;
+    --surface: #f8f9fa;
+    --green-bg: #f0f7f2;
+    --green-border: #a0d4b0;
+    --green-text: #2a5a3a;
+    --green-strong: #16a34a;
+    --red-bg: #fef2f2;
+    --red-border: #fca5a5;
+    --red-text: #991b1b;
+    --red-strong: #dc2626;
+    --yellow-bg: #fffbeb;
+    --yellow-border: #fcd34d;
+    --yellow-text: #92400e;
+    --yellow-strong: #d97706;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 24px 16px 100px;
+  }
+
+  /* Header */
+  .header { margin-bottom: 28px; }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; display: inline; }
+  .header .version { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 10px; }
+  .header .subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 2px solid var(--border-light);
+    margin-bottom: 24px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab-btn {
+    padding: 10px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    white-space: nowrap;
+    margin-bottom: -2px;
+    font-family: var(--sans);
+    transition: all 0.1s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab-btn.active { font-weight: 700; color: var(--fg); border-bottom-color: var(--fg); }
+  .tab-badge {
+    background: var(--red-strong);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    min-width: 16px;
+    text-align: center;
+  }
+
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    background: #fafafa;
+    transition: all 0.15s;
+  }
+  .dropzone.dragover { border-color: var(--green-text); background: var(--green-bg); }
+  .dropzone-icon { color: #999; margin-bottom: 8px; }
+  .dropzone.dragover .dropzone-icon { color: var(--green-text); }
+  .dropzone-label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 4px; }
+  .dropzone-hint { font-size: 11px; color: #999; }
+  .dropzone input[type=file] { display: none; }
+
+  .file-loaded {
+    border: 1px solid var(--green-text);
+    border-radius: 8px;
+    padding: 12px 16px;
+    background: var(--green-bg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .file-loaded .file-info { display: flex; align-items: center; gap: 10px; }
+  .file-loaded .file-name { font-weight: 600; font-size: 13px; }
+  .file-loaded .file-size { font-size: 11px; color: #666; }
+  .file-loaded .file-clear {
+    background: none; border: none; cursor: pointer; color: #888; padding: 4px; font-size: 18px;
+  }
+
+  /* Alert boxes */
+  .alert {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .alert-success { background: var(--green-bg); color: var(--green-text); border: 1px solid var(--green-border); }
+  .alert-error { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red-border); }
+  .alert-warning { background: var(--yellow-bg); color: var(--yellow-text); border: 1px solid var(--yellow-border); }
+  .alert-info { background: var(--surface); color: #555; border: 1px solid var(--border); }
+
+  /* Buttons */
+  .btn {
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--sans);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: opacity 0.1s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary { background: var(--fg); color: #fff; }
+  .btn-secondary { background: var(--border-light); color: var(--fg); }
+  .btn-danger { background: none; border: none; color: #c00; cursor: pointer; padding: 4px; }
+  .btn-lg { padding: 12px 32px; font-size: 15px; border-radius: 8px; }
+  .btn-run { padding: 10px 28px; font-size: 14px; border-radius: 8px; }
+
+  /* Table */
+  .door-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .door-table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-weight: 700;
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+  .door-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .door-table tr:nth-child(even) { background: #fafafa; }
+  .door-table tr.row-critical { background: var(--red-bg); }
+  .door-table tr.row-warning { background: var(--yellow-bg); }
+  .mono { font-family: var(--mono); }
+  .dot-critical { color: var(--red-strong); margin-left: 4px; }
+  .dot-warning { color: var(--yellow-strong); margin-left: 4px; }
+  .dim { color: #ccc; }
+
+  /* Hardware set editor */
+  .hw-set-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    background: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .hw-set-num { font-weight: 700; font-size: 13px; font-family: var(--mono); }
+  .hw-set-desc { font-size: 12px; color: #666; margin-left: 8px; }
+  .hw-set-components { font-size: 11px; color: #999; margin-top: 2px; }
+  .hw-set-actions { display: flex; gap: 6px; }
+
+  .hw-edit-form {
+    border: 2px solid var(--fg);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 8px;
+    background: #fafafa;
+  }
+  .hw-edit-form label { font-size: 11px; font-weight: 600; color: #666; display: block; margin-bottom: 2px; }
+  .hw-edit-form input, .hw-edit-form select {
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--sans);
+    width: 100%;
+  }
+  .hw-comp-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  /* Summary cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 600px) {
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .summary-card {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .summary-card .number {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--mono);
+  }
+  .summary-card .label {
+    font-size: 11px;
+    color: #666;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Issue cards */
+  .issue-card {
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+  }
+  .issue-card.critical { background: var(--red-bg); border: 1px solid var(--red-border); }
+  .issue-card.warning { background: var(--yellow-bg); border: 1px solid var(--yellow-border); }
+  .issue-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .issue-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #fff;
+  }
+  .issue-badge.critical { background: var(--red-strong); }
+  .issue-badge.warning { background: var(--yellow-strong); }
+  .issue-door { font-weight: 700; font-size: 13px; font-family: var(--mono); }
+  .issue-cost { font-size: 11px; font-weight: 600; margin-left: auto; }
+  .issue-description { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .issue-details { font-size: 12px; color: #555; margin-bottom: 8px; }
+  .issue-solutions { font-size: 12px; color: #444; }
+  .issue-solutions strong { font-weight: 600; }
+
+  /* Cost impact box */
+  .cost-impact {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 20px;
+  }
+
+  /* Sticky footer */
+  .sticky-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  /* Loading spinner */
+  .spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Table container */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Section headers */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .section-title { font-size: 14px; font-weight: 700; }
+
+  /* Info box */
+  .info-box {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 13px;
+    color: #555;
+    line-height: 1.6;
+  }
+  .info-box .title { font-weight: 700; color: var(--fg); margin-bottom: 6px; }
+  .code-sample {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #eef0f2;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.6;
+  }
+
+  /* Parse warnings */
+  .parse-warnings { margin-top: 10px; }
+  .parse-warning-item { font-size: 12px; color: var(--yellow-text); margin-bottom: 2px; }
+
+  /* Center message */
+  .center-msg { text-align: center; padding: 40px; color: #999; }
+
+  /* Success box */
+  .success-box {
+    background: var(--green-bg);
+    border: 1px solid var(--green-border);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+  }
+  .success-box .title { font-size: 15px; font-weight: 700; color: var(--green-text); }
+  .success-box .subtitle { font-size: 12px; color: #4a8a5a; margin-top: 4px; }
+
+  /* Column mapping display */
+  .col-map {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .col-tag {
+    background: #eef0f2;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: #444;
+  }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>Door Review Tool</h1>
+    <span class="version">v2.0</span>
+    <div class="subtitle">Upload door schedules · Add hardware sets · Get compatibility reports</div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="upload" onclick="switchTab('upload')">Upload</button>
+    <button class="tab-btn" data-tab="doors" onclick="switchTab('doors')">Doors <span id="doors-count"></span></button>
+    <button class="tab-btn" data-tab="hardware" onclick="switchTab('hardware')">Hardware <span id="hw-count"></span></button>
+    <button class="tab-btn" data-tab="report" onclick="switchTab('report')">Report <span id="report-badge" class="tab-badge hidden">0</span></button>
+  </div>
+
+  <!-- UPLOAD TAB -->
+  <div id="tab-upload" class="tab-panel">
+    <div style="margin-bottom:24px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">Door Schedule</div>
+      <div id="dropzone-container"></div>
+      <div id="parse-result"></div>
+    </div>
+
+    <div class="info-box">
+      <div class="title">Supported Formats</div>
+      <div><strong>PDF</strong> — Architectural door schedule tables are automatically detected and parsed.</div>
+      <div><strong>CSV / TSV</strong> — Exported from Excel, Bluebeam, or any spreadsheet tool.</div>
+      <div><strong>Excel (.xlsx)</strong> — Direct upload of spreadsheet door schedules.</div>
+      <div style="margin-top:10px">The parser automatically recognizes 60+ column header variations (Door #, HW Set, Matl, Thk, etc.)</div>
+      <div class="code-sample">Door #,Room,Width,Height,Thk,Material,Type,Frame,Fire Rating,Glazing,HW Set,Comments
+101,LOBBY,6'-0",7'-0",1 3/4",ALUMINUM,VA1,ALUM,,1/4" CLR,7,MAIN ENTRANCE
+102,OFFICE,3'-0",7'-0",1 3/4",WOOD,FW1,HM,,,3,</div>
+    </div>
+  </div>
+
+  <!-- DOORS TAB -->
+  <div id="tab-doors" class="tab-panel hidden">
+    <div id="doors-content"></div>
+  </div>
+
+  <!-- HARDWARE TAB -->
+  <div id="tab-hardware" class="tab-panel hidden">
+    <div id="hardware-content"></div>
+  </div>
+
+  <!-- REPORT TAB -->
+  <div id="tab-report" class="tab-panel hidden">
+    <div id="report-content"></div>
+  </div>
+
+  <!-- Sticky footer -->
+  <div id="sticky-footer" class="sticky-footer hidden">
+    <button class="btn btn-primary btn-run" onclick="runReview()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <span id="run-btn-text">Run Review</span>
+    </button>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+
+const state = {
+  file: null,
+  doors: [],
+  hardwareSets: {},
+  issues: [],
+  reviewRun: false,
+  parseInfo: null,
+  loading: false,
+  activeTab: 'upload',
+  editingHwSet: null,
+};
+
+// ─────────────────────────────────────────────
+// KNOWLEDGE BASE (for client-side display)
+// ─────────────────────────────────────────────
+
+const COMPONENT_TYPES = [
+  { value: 'panic_hardware', label: 'Panic Hardware' },
+  { value: 'closer', label: 'Closer' },
+  { value: 'lockset', label: 'Lockset' },
+  { value: 'hinge', label: 'Hinge' },
+  { value: 'continuous_hinge', label: 'Continuous Hinge' },
+  { value: 'coordinator', label: 'Coordinator' },
+  { value: 'threshold', label: 'Threshold' },
+  { value: 'weatherstrip', label: 'Weatherstrip' },
+  { value: 'door_stop', label: 'Door Stop' },
+  { value: 'kick_plate', label: 'Kick Plate' },
+  { value: 'other', label: 'Other' },
+];
+
+// ─────────────────────────────────────────────
+// TAB SWITCHING
+// ─────────────────────────────────────────────
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById(`tab-${tab}`).classList.remove('hidden');
+  updateFooter();
+}
+
+// ─────────────────────────────────────────────
+// FILE UPLOAD
+// ─────────────────────────────────────────────
+
+function renderDropzone() {
+  const container = document.getElementById('dropzone-container');
+
+  if (state.file) {
+    container.innerHTML = `
+      <div class="file-loaded">
+        <div class="file-info">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div>
+            <div class="file-name">${state.file.name}</div>
+            <div class="file-size">${(state.file.size / 1024).toFixed(1)} KB</div>
+          </div>
+        </div>
+        <button class="file-clear" onclick="clearFile()">×</button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <div class="dropzone-label">Door Schedule (PDF, CSV, Excel)</div>
+      <div class="dropzone-hint">Drag & drop or click to browse</div>
+      <input type="file" id="file-input" accept=".pdf,.csv,.tsv,.txt,.xlsx,.xls">
+    </div>
+  `;
+
+  const dz = document.getElementById('dropzone');
+  const input = document.getElementById('file-input');
+
+  dz.addEventListener('click', () => input.click());
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+}
+
+async function handleFile(file) {
+  state.file = file;
+  state.loading = true;
+  state.reviewRun = false;
+  state.issues = [];
+  renderDropzone();
+  document.getElementById('parse-result').innerHTML = '<div class="alert alert-info">Parsing schedule... <span class="spinner"></span></div>';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/api/parse-schedule', { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    if (data.error) {
+      state.parseInfo = { error: data.error };
+      document.getElementById('parse-result').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+      state.doors = [];
+    } else {
+      state.doors = data.doors;
+      state.parseInfo = {
+        count: data.door_count,
+        source: data.source,
+        pages: data.page_count,
+        columns: data.column_mapping,
+        warnings: data.warnings,
+      };
+
+      let html = `<div class="alert alert-success">Extracted <strong>${data.door_count} doors</strong> from ${data.source}`;
+      if (data.page_count > 0) html += ` (${data.page_count} page${data.page_count > 1 ? 's' : ''})`;
+      html += `</div>`;
+
+      if (data.column_mapping && Object.keys(data.column_mapping).length > 0) {
+        html += `<div class="col-map">`;
+        for (const [orig, mapped] of Object.entries(data.column_mapping)) {
+          html += `<span class="col-tag">${orig.replace(/\n/g, ' ')} → ${mapped}</span>`;
+        }
+        html += `</div>`;
+      }
+
+      if (data.warnings?.length > 0) {
+        html += `<div class="parse-warnings">`;
+        for (const w of data.warnings) {
+          html += `<div class="parse-warning-item">⚠ ${w}</div>`;
+        }
+        html += `</div>`;
+      }
+
+      document.getElementById('parse-result').innerHTML = html;
+      renderDoorsTab();
+      updateCounts();
+      switchTab('doors');
+    }
+  } catch (err) {
+    document.getElementById('parse-result').innerHTML = `<div class="alert alert-error">Upload failed: ${err.message}</div>`;
+  }
+
+  state.loading = false;
+}
+
+function clearFile() {
+  state.file = null;
+  state.doors = [];
+  state.parseInfo = null;
+  state.issues = [];
+  state.reviewRun = false;
+  renderDropzone();
+  document.getElementById('parse-result').innerHTML = '';
+  renderDoorsTab();
+  updateCounts();
+  updateFooter();
+}
+
+// ─────────────────────────────────────────────
+// DOORS TABLE
+// ─────────────────────────────────────────────
+
+function normalizeMaterial(mat) {
+  if (!mat) return 'unknown';
+  const m = mat.toLowerCase();
+  if (m.includes('alum')) return 'aluminum';
+  if (m.includes('wood') || m.includes('wd')) return 'wood';
+  if (m.includes('metal') || m.includes('hm') || m.includes('hollow') || m.includes('steel')) return 'hollow_metal';
+  return m || 'unknown';
+}
+
+function renderDoorsTab() {
+  const container = document.getElementById('doors-content');
+  if (state.doors.length === 0) {
+    container.innerHTML = '<div class="center-msg">No doors loaded. Upload a door schedule first.</div>';
+    return;
+  }
+
+  let html = '<div class="table-wrap"><table class="door-table"><thead><tr>';
+  const cols = ['Door #', 'Room', 'Size', 'Material', 'Type', 'Frame', 'Fire', 'Glazing', 'HW Set'];
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr></thead><tbody>';
+
+  for (const d of state.doors) {
+    const doorIssues = state.issues.filter(i => i.door_number === d.door_number);
+    const hasCrit = doorIssues.some(i => i.severity === 'critical');
+    const hasWarn = doorIssues.some(i => i.severity === 'warning');
+    const rowClass = hasCrit ? 'row-critical' : hasWarn ? 'row-warning' : '';
+    const mat = d._normalized_material || normalizeMaterial(d.material);
+    const size = d.width && d.height ? `${d.width} × ${d.height}` : '';
+    const dot = hasCrit ? '<span class="dot-critical">●</span>' : hasWarn ? '<span class="dot-warning">●</span>' : '';
+
+    html += `<tr class="${rowClass}">`;
+    html += `<td class="mono" style="font-weight:700">${d.door_number}${dot}</td>`;
+    html += `<td>${d.room_name || ''}</td>`;
+    html += `<td class="mono" style="font-size:11px">${size}</td>`;
+    html += `<td>${mat}</td>`;
+    html += `<td class="mono">${d.door_type || ''}</td>`;
+    html += `<td>${d.frame_material || ''}</td>`;
+    html += `<td style="color:${d.fire_rating ? 'var(--red-text)' : '#ccc'}">${d.fire_rating || '—'}</td>`;
+    html += `<td style="font-size:11px">${d.glazing || '—'}</td>`;
+    html += `<td class="mono" style="font-weight:600">${d.hardware_set || '—'}</td>`;
+    html += `</tr>`;
+  }
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+}
+
+// ─────────────────────────────────────────────
+// HARDWARE SET EDITOR
+// ─────────────────────────────────────────────
+
+function renderHardwareTab() {
+  const container = document.getElementById('hardware-content');
+  const sets = state.hardwareSets;
+  const keys = Object.keys(sets).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;letter-spacing:0.02em">HARDWARE SETS (${keys.length})</div>
+      <button class="btn btn-primary" onclick="startAddHwSet()">+ Add Set</button>
+    </div>
+  `;
+
+  if (keys.length === 0 && !state.editingHwSet) {
+    html += `<div class="alert alert-warning" style="margin-top:0">
+      No hardware sets loaded yet. Add them manually above. Hardware-specific compatibility checks require hardware set data.
+    </div>`;
+  }
+
+  for (const num of keys) {
+    const s = sets[num];
+    const comps = (s.components || []).map(c => `${c.manufacturer} ${c.series}`.trim()).filter(Boolean).join(' · ');
+    html += `
+      <div class="hw-set-card">
+        <div>
+          <span class="hw-set-num">Set ${num}</span>
+          <span class="hw-set-desc">${s.description || ''}</span>
+          <div class="hw-set-components">${comps || 'No components'}</div>
+        </div>
+        <div class="hw-set-actions">
+          <button class="btn btn-secondary" onclick="editHwSet('${num}')">Edit</button>
+          <button class="btn-danger" onclick="removeHwSet('${num}')">🗑</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Unmatched sets warning
+  if (state.doors.length > 0) {
+    const referenced = new Set(state.doors.map(d => d.hardware_set).filter(Boolean));
+    const loaded = new Set(Object.keys(sets));
+    const unmatched = [...referenced].filter(s => !loaded.has(s)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (unmatched.length > 0) {
+      html += `<div class="alert alert-warning" style="margin-top:16px">
+        <strong>Missing sets:</strong> The door schedule references sets ${unmatched.join(', ')} which haven't been added yet.
+      </div>`;
+    }
+  }
+
+  // Edit form
+  if (state.editingHwSet) {
+    html += renderHwEditForm();
+  }
+
+  container.innerHTML = html;
+}
+
+function renderHwEditForm() {
+  const f = state.editingHwSet;
+  let html = `<div class="hw-edit-form">`;
+
+  html += `<div style="display:flex;gap:12px;margin-bottom:12px">`;
+  html += `<div style="flex:0 0 80px"><label>Set #</label>
+    <input id="hw-set-num" value="${f.setNumber}" ${f.isEdit ? 'disabled' : ''} style="font-family:var(--mono)"></div>`;
+  html += `<div style="flex:1"><label>Description</label>
+    <input id="hw-set-desc" value="${f.description}" placeholder="e.g., Exterior Entrance - Panic"></div>`;
+  html += `</div>`;
+
+  html += `<div style="font-size:11px;font-weight:600;color:#666;margin-bottom:6px">Components</div>`;
+
+  f.components.forEach((comp, idx) => {
+    html += `<div class="hw-comp-row">`;
+    html += `<select onchange="updateHwComp(${idx},'type',this.value)" style="width:140px">`;
+    COMPONENT_TYPES.forEach(t => {
+      html += `<option value="${t.value}" ${comp.type === t.value ? 'selected' : ''}>${t.label}</option>`;
+    });
+    html += `</select>`;
+    html += `<input value="${comp.manufacturer}" onchange="updateHwComp(${idx},'manufacturer',this.value)" placeholder="Manufacturer" style="flex:1;min-width:100px">`;
+    html += `<input value="${comp.series}" onchange="updateHwComp(${idx},'series',this.value)" placeholder="Series" style="width:80px">`;
+    html += `<input value="${comp.model || ''}" onchange="updateHwComp(${idx},'model',this.value)" placeholder="Model (opt)" style="flex:1;min-width:100px">`;
+    if (f.components.length > 1) {
+      html += `<button class="btn-danger" onclick="removeHwComp(${idx})">×</button>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `<button class="btn btn-secondary" onclick="addHwComp()" style="margin-top:4px;font-size:11px">+ Add Component</button>`;
+
+  html += `<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">`;
+  html += `<button class="btn btn-secondary" onclick="cancelHwEdit()">Cancel</button>`;
+  html += `<button class="btn btn-primary" onclick="saveHwSet()">Save</button>`;
+  html += `</div></div>`;
+
+  return html;
+}
+
+function startAddHwSet() {
+  state.editingHwSet = {
+    setNumber: '',
+    description: '',
+    components: [{ type: 'panic_hardware', manufacturer: 'Von Duprin', series: '98', model: '' }],
+    isEdit: false,
+  };
+  renderHardwareTab();
+}
+
+function editHwSet(num) {
+  const s = state.hardwareSets[num];
+  state.editingHwSet = {
+    setNumber: num,
+    description: s.description || '',
+    components: s.components.length > 0 ? JSON.parse(JSON.stringify(s.components)) : [{ type: 'panic_hardware', manufacturer: '', series: '', model: '' }],
+    isEdit: true,
+  };
+  renderHardwareTab();
+}
+
+function cancelHwEdit() {
+  state.editingHwSet = null;
+  renderHardwareTab();
+}
+
+function updateHwComp(idx, field, value) {
+  state.editingHwSet.components[idx][field] = value;
+}
+
+function addHwComp() {
+  state.editingHwSet.components.push({ type: 'lockset', manufacturer: '', series: '', model: '' });
+  renderHardwareTab();
+}
+
+function removeHwComp(idx) {
+  state.editingHwSet.components.splice(idx, 1);
+  renderHardwareTab();
+}
+
+function saveHwSet() {
+  const num = document.getElementById('hw-set-num').value.trim();
+  const desc = document.getElementById('hw-set-desc').value.trim();
+  if (!num) return alert('Set number is required');
+
+  state.hardwareSets[num] = {
+    description: desc,
+    components: state.editingHwSet.components.filter(c => c.manufacturer || c.series),
+  };
+  state.editingHwSet = null;
+  state.reviewRun = false;
+  renderHardwareTab();
+  updateCounts();
+  updateFooter();
+}
+
+function removeHwSet(num) {
+  delete state.hardwareSets[num];
+  state.reviewRun = false;
+  renderHardwareTab();
+  updateCounts();
+  updateFooter();
+}
+
+// ─────────────────────────────────────────────
+// RUN REVIEW
+// ─────────────────────────────────────────────
+
+async function runReview() {
+  const btn = document.querySelector('#sticky-footer button');
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  btn.disabled = true;
+
+  // Build doors data in checker format
+  const doorsData = state.doors.map(d => ({
+    door_number: d.door_number,
+    width: d.width || '',
+    height: d.height || '',
+    thickness: d.thickness || '',
+    material: d.material || '',
+    door_type: d.door_type || '',
+    manufacturer: d.manufacturer || '',
+    product_line: d.product_line || '',
+    frame_material: d.frame_material || '',
+    fire_rating: d.fire_rating || '',
+    hardware_set: d.hardware_set || '',
+    glazing: d.glazing || '',
+    room_name: d.room_name || '',
+    comments: d.comments || '',
+  }));
+
+  try {
+    const resp = await fetch('/api/run-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_name: state.file?.name || 'Review',
+        doors: doorsData,
+        hardware_sets: state.hardwareSets,
+      }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      alert('Review failed: ' + data.error);
+    } else {
+      state.issues = data.issues;
+      state.reviewRun = true;
+      renderReportTab(data);
+      renderDoorsTab(); // Update door table with issue highlighting
+      switchTab('report');
+      updateCounts();
+    }
+  } catch (err) {
+    alert('Review failed: ' + err.message);
+  }
+
+  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Run Review`;
+  btn.disabled = false;
+}
+
+function renderReportTab(data) {
+  const container = document.getElementById('report-content');
+
+  if (!state.reviewRun) {
+    if (state.doors.length === 0) {
+      container.innerHTML = '<div class="center-msg">Upload a door schedule to get started.</div>';
+    } else {
+      container.innerHTML = `
+        <div class="center-msg">
+          <div style="color:#555;margin-bottom:16px;font-size:14px">
+            Ready to review <strong>${state.doors.length} doors</strong>
+            ${Object.keys(state.hardwareSets).length > 0 ? ` against ${Object.keys(state.hardwareSets).length} hardware sets` : ' (no hardware sets loaded — only glass/dimension checks will run)'}.
+          </div>
+          <button class="btn btn-primary btn-lg" onclick="runReview()">Run Compatibility Review</button>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  const summary = data.summary;
+  const issues = data.issues;
+  const critical = issues.filter(i => i.severity === 'critical');
+  const warnings = issues.filter(i => i.severity === 'warning');
+
+  let html = '';
+
+  // Summary cards
+  html += '<div class="summary-grid">';
+  html += `<div class="summary-card"><div class="number">${summary.total_doors}</div><div class="label">Doors Reviewed</div></div>`;
+  html += `<div class="summary-card" style="background:${critical.length > 0 ? 'var(--red-bg)' : 'var(--green-bg)'}"><div class="number" style="color:${critical.length > 0 ? 'var(--red-strong)' : 'var(--green-strong)'}">${summary.critical}</div><div class="label">Critical</div></div>`;
+  html += `<div class="summary-card" style="background:${warnings.length > 0 ? 'var(--yellow-bg)' : 'var(--green-bg)'}"><div class="number" style="color:${warnings.length > 0 ? 'var(--yellow-strong)' : 'var(--green-strong)'}">${summary.warnings}</div><div class="label">Warnings</div></div>`;
+  html += `<div class="summary-card" style="background:var(--green-bg)"><div class="number" style="color:var(--green-strong)">${summary.doors_ok}</div><div class="label">Clean</div></div>`;
+  html += '</div>';
+
+  // No issues
+  if (issues.length === 0) {
+    html += `<div class="success-box">
+      <div class="title">✓ All doors passed compatibility checks</div>
+      <div class="subtitle">No issues found with the current data and hardware sets.</div>
+    </div>`;
+  }
+
+  // Critical issues
+  if (critical.length > 0) {
+    html += `<div style="margin-bottom:20px">
+      <div class="section-header"><span class="section-title" style="color:var(--red-text)">⚠ Critical Issues — Must Resolve Before Fabrication</span></div>`;
+    for (const issue of critical) {
+      html += renderIssueCard(issue, 'critical');
+    }
+    html += '</div>';
+  }
+
+  // Warnings
+  if (warnings.length > 0) {
+    html += `<div style="margin-bottom:20px">
+      <div class="section-header"><span class="section-title" style="color:var(--yellow-text)">⚠ Warnings — Verify Before Proceeding</span></div>`;
+    for (const issue of warnings) {
+      html += renderIssueCard(issue, 'warning');
+    }
+    html += '</div>';
+  }
+
+  // Cost impact
+  if (critical.length > 0) {
+    html += `<div class="cost-impact">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">COST IMPACT</div>
+      <div style="font-size:13px;color:var(--green-strong);font-weight:600;margin-bottom:4px">Caught at submittal review: $0 to fix</div>
+      <div style="font-size:13px;color:var(--red-strong);font-weight:600">If discovered during fabrication/installation:</div>`;
+    for (const issue of critical) {
+      if (issue.cost_if_missed) {
+        html += `<div style="font-size:12px;color:var(--red-text);margin-left:16px;margin-top:2px">Door ${issue.door_number}: ${issue.cost_if_missed}</div>`;
+      }
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function renderIssueCard(issue, severity) {
+  const colorClass = severity;
+  return `
+    <div class="issue-card ${colorClass}">
+      <div class="issue-header">
+        <span class="issue-badge ${colorClass}">${severity}</span>
+        <span class="issue-door" style="color:${severity === 'critical' ? 'var(--red-text)' : 'var(--yellow-text)'}">Door ${issue.door_number}</span>
+        ${issue.cost_if_missed ? `<span class="issue-cost" style="color:${severity === 'critical' ? 'var(--red-text)' : 'var(--yellow-text)'}">${issue.cost_if_missed}</span>` : ''}
+      </div>
+      <div class="issue-description">${issue.description}</div>
+      <div class="issue-details">${issue.details}</div>
+      ${issue.solutions?.length > 0 ? `<div class="issue-solutions"><strong>Solutions:</strong> ${issue.solutions.join(' · ')}</div>` : ''}
+    </div>
+  `;
+}
+
+// ─────────────────────────────────────────────
+// UI UPDATES
+// ─────────────────────────────────────────────
+
+function updateCounts() {
+  const dc = document.getElementById('doors-count');
+  const hc = document.getElementById('hw-count');
+  const rb = document.getElementById('report-badge');
+
+  dc.textContent = state.doors.length > 0 ? `(${state.doors.length})` : '';
+  hc.textContent = Object.keys(state.hardwareSets).length > 0 ? `(${Object.keys(state.hardwareSets).length})` : '';
+
+  const issueCount = state.issues.filter(i => i.severity === 'critical' || i.severity === 'warning').length;
+  if (state.reviewRun && issueCount > 0) {
+    rb.textContent = issueCount;
+    rb.classList.remove('hidden');
+  } else {
+    rb.classList.add('hidden');
+  }
+}
+
+function updateFooter() {
+  const footer = document.getElementById('sticky-footer');
+  const btnText = document.getElementById('run-btn-text');
+  if (state.doors.length > 0 && state.activeTab !== 'report') {
+    footer.classList.remove('hidden');
+    const hwCount = Object.keys(state.hardwareSets).length;
+    btnText.textContent = `Run Review (${state.doors.length} doors${hwCount > 0 ? `, ${hwCount} HW sets` : ''})`;
+  } else {
+    footer.classList.add('hidden');
+  }
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+
+renderDropzone();
+renderDoorsTab();
+renderHardwareTab();
+renderReportTab({});
+updateCounts();
+updateFooter();
+</script>
+</body>
+</html>

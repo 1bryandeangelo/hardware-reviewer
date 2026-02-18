@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Door Review Tool</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  }
+  body { font-family: var(--sans); max-width: 960px; margin: 0 auto; padding: 24px 16px; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #777; margin-bottom: 24px; }
+  .back { font-size: 13px; color: #555; text-decoration: none; margin-bottom: 16px; display: inline-block; }
+  .back:hover { color: #000; }
+
+  .section { margin-bottom: 32px; }
+  .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+
+  .dropzone {
+    border: 2px dashed #ccc; border-radius: 8px; padding: 32px 20px;
+    text-align: center; cursor: pointer; background: #fafafa; transition: all 0.15s;
+  }
+  .dropzone.dragover { border-color: #2a5a3a; background: #f0f7f2; }
+  .dropzone input { display: none; }
+
+  .alert { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-top: 12px; }
+  .alert-success { background: #f0f7f2; color: #2a5a3a; border: 1px solid #a0d4b0; }
+  .alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+  .alert-info { background: #f8f9fa; color: #555; border: 1px solid #e0e0e0; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: #f8f9fa; border-radius: 8px; padding: 12px; text-align: center; }
+  .stat-card .num { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+  .stat-card .label { font-size: 11px; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  th { text-align: left; padding: 8px; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; background: #fff; }
+  td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+  tr:nth-child(even) { background: #fafafa; }
+  .mono { font-family: var(--mono); font-size: 11px; }
+
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; color: #fff; text-transform: uppercase; display: inline-block; }
+  .badge-critical { background: #dc2626; }
+  .badge-moderate { background: #d97706; }
+  .badge-warning { background: #3b82f6; }
+  .badge-advisory { background: #8b5cf6; }
+
+  .spinner { width: 16px; height: 16px; border: 2px solid rgba(0,0,0,0.1); border-top-color: #1a1a1a; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tabs { display: flex; gap: 2px; border-bottom: 2px solid #f0f0f0; margin-bottom: 16px; }
+  .tab-btn { padding: 8px 16px; border: none; border-bottom: 2px solid transparent; background: none; cursor: pointer; font-size: 13px; font-weight: 500; color: #888; font-family: var(--sans); margin-bottom: -2px; }
+  .tab-btn.active { font-weight: 700; color: #1a1a1a; border-bottom-color: #1a1a1a; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .table-wrap { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+</style>
+</head>
+<body>
+  <a href="/" class="back">← Back to Review Tool</a>
+  <h1>Admin Panel</h1>
+  <div class="subtitle">Upload and manage the rules spreadsheet that drives compatibility checks.</div>
+
+  <!-- Upload Section -->
+  <div class="section">
+    <div class="section-title">Upload Rules Spreadsheet</div>
+    <div class="dropzone" id="dropzone">
+      <div style="color:#999;margin-bottom:8px">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:#444">Drop your updated rules spreadsheet here</div>
+      <div style="font-size:11px;color:#999;margin-top:4px">.xlsx format — replaces current rules immediately</div>
+      <input type="file" id="file-input" accept=".xlsx,.xls">
+    </div>
+    <div id="upload-result"></div>
+  </div>
+
+  <!-- Current Rules -->
+  <div class="section">
+    <div class="section-title">Currently Loaded Rules</div>
+    <div id="loading"><span class="spinner"></span> Loading...</div>
+    <div id="rules-content" style="display:none">
+      <div class="stat-grid" id="stats"></div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('rules')">Rules</button>
+        <button class="tab-btn" onclick="showTab('stiles')">Stile Widths</button>
+      </div>
+
+      <div id="tab-rules" class="tab-panel active">
+        <div class="table-wrap" id="rules-table"></div>
+      </div>
+      <div id="tab-stiles" class="tab-panel">
+        <div class="table-wrap" id="stiles-table"></div>
+      </div>
+    </div>
+    <div id="no-rules" style="display:none" class="alert alert-info">
+      No rules loaded yet. Upload a spreadsheet above to get started.
+    </div>
+  </div>
+
+<script>
+  // Tab switching
+  function showTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase().includes(name)));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  // File upload
+  const dz = document.getElementById('dropzone');
+  const input = document.getElementById('file-input');
+
+  dz.addEventListener('click', () => input.click());
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+  input.addEventListener('change', e => { if (e.target.files[0]) uploadFile(e.target.files[0]); });
+
+  async function uploadFile(file) {
+    const result = document.getElementById('upload-result');
+    result.innerHTML = '<div class="alert alert-info"><span class="spinner"></span> Uploading and validating...</div>';
+
+    const form = new FormData();
+    form.append('file', file);
+
+    try {
+      const resp = await fetch('/api/upload-rules', { method: 'POST', body: form });
+      const data = await resp.json();
+      if (data.error) {
+        result.innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+      } else {
+        result.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+        loadRules(); // Refresh display
+      }
+    } catch (err) {
+      result.innerHTML = `<div class="alert alert-error">Upload failed: ${err.message}</div>`;
+    }
+  }
+
+  // Load current rules
+  async function loadRules() {
+    try {
+      const resp = await fetch('/api/rules-summary');
+      const data = await resp.json();
+
+      document.getElementById('loading').style.display = 'none';
+
+      if (!data.loaded) {
+        document.getElementById('no-rules').style.display = 'block';
+        document.getElementById('rules-content').style.display = 'none';
+        return;
+      }
+
+      document.getElementById('no-rules').style.display = 'none';
+      document.getElementById('rules-content').style.display = 'block';
+
+      // Stats
+      const cats = data.categories || {};
+      const sevs = data.severities || {};
+      document.getElementById('stats').innerHTML = `
+        <div class="stat-card"><div class="num">${data.total_rules}</div><div class="label">Total Rules</div></div>
+        <div class="stat-card"><div class="num">${sevs['Critical'] || 0}</div><div class="label">Critical</div></div>
+        <div class="stat-card"><div class="num">${sevs['Moderate'] || 0}</div><div class="label">Moderate</div></div>
+        <div class="stat-card"><div class="num">${data.stile_entries}</div><div class="label">Stile Entries</div></div>
+        <div class="stat-card"><div class="num">${(data.vendors || []).length}</div><div class="label">Vendors</div></div>
+      `;
+
+      // Rules table
+      let rhtml = '<table><thead><tr><th>ID</th><th>Category</th><th>Condition</th><th>Threshold</th><th>Severity</th><th>Code</th><th>Fix</th></tr></thead><tbody>';
+      for (const r of (data.rules || [])) {
+        const bc = r.severity === 'Critical' ? 'critical' : r.severity === 'Moderate' ? 'moderate' : r.severity === 'Warning' ? 'warning' : 'advisory';
+        rhtml += `<tr>
+          <td class="mono">${r.rule_id}</td>
+          <td>${r.category}</td>
+          <td>${r.condition}</td>
+          <td class="mono">${r.threshold}</td>
+          <td><span class="badge badge-${bc}">${r.severity}</span></td>
+          <td class="mono" style="font-size:10px">${r.code_reference}</td>
+          <td style="max-width:200px;font-size:11px">${r.fix_recommendation}</td>
+        </tr>`;
+      }
+      rhtml += '</tbody></table>';
+      document.getElementById('rules-table').innerHTML = rhtml;
+
+      // Stile table
+      let shtml = '<table><thead><tr><th>Vendor</th><th>Model</th><th>Series</th><th>Width</th><th>Depth</th></tr></thead><tbody>';
+      for (const s of (data.stile_widths || [])) {
+        shtml += `<tr>
+          <td style="font-weight:600">${s.vendor}</td>
+          <td>${s.model}</td>
+          <td class="mono">${s.series}</td>
+          <td class="mono">${s.width}</td>
+          <td class="mono">${s.depth}</td>
+        </tr>`;
+      }
+      shtml += '</tbody></table>';
+      document.getElementById('stiles-table').innerHTML = shtml;
+
+    } catch (err) {
+      document.getElementById('loading').innerHTML = `<div class="alert alert-error">Failed to load rules: ${err.message}</div>`;
+    }
+  }
+
+  loadRules();
+</script>
+</body>
+</html>

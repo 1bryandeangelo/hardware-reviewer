@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: door-review-tool
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATA_DIR
+        value: /opt/render/project/data
+    disk:
+      name: rules-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1
