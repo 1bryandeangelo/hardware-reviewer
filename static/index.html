@@ -133,6 +133,7 @@
   .alert-error { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red-border); }
   .alert-warning { background: var(--yellow-bg); color: var(--yellow-text); border: 1px solid var(--yellow-border); }
   .alert-info { background: var(--surface); color: #555; border: 1px solid var(--border); }
+  .alert-ok { background: var(--green-bg); color: var(--green-text); border: 1px solid var(--green-border); }
 
   /* Buttons */
   .btn {
@@ -393,7 +394,7 @@
   <div class="header">
     <h1>Door Review Tool</h1>
     <span class="version">v2.0</span>
-    <div class="subtitle">Upload door schedules · Add hardware sets · Get compatibility reports</div>
+    <div class="subtitle" id="app-subtitle">Upload door schedules · Add hardware sets · Get compatibility reports</div>
   </div>
 
   <!-- Tabs -->
@@ -402,6 +403,7 @@
     <button class="tab-btn" data-tab="doors" onclick="switchTab('doors')">Doors <span id="doors-count"></span></button>
     <button class="tab-btn" data-tab="hardware" onclick="switchTab('hardware')">Hardware <span id="hw-count"></span></button>
     <button class="tab-btn" data-tab="report" onclick="switchTab('report')">Report <span id="report-badge" class="tab-badge hidden">0</span></button>
+    <button class="tab-btn" data-tab="projects" onclick="switchTab('projects')">Projects</button>
   </div>
 
   <!-- UPLOAD TAB -->
@@ -412,15 +414,17 @@
       <div id="parse-result"></div>
     </div>
 
+    <div style="margin-bottom:24px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">Floor Plan (Compare Door Numbers)</div>
+      <div id="fp-dropzone-container"></div>
+      <div id="fp-parse-result"></div>
+    </div>
+
     <div class="info-box">
       <div class="title">Supported Formats</div>
-      <div><strong>PDF</strong> — Architectural door schedule tables are automatically detected and parsed.</div>
-      <div><strong>CSV / TSV</strong> — Exported from Excel, Bluebeam, or any spreadsheet tool.</div>
-      <div><strong>Excel (.xlsx)</strong> — Direct upload of spreadsheet door schedules.</div>
-      <div style="margin-top:10px">The parser automatically recognizes 60+ column header variations (Door #, HW Set, Matl, Thk, etc.)</div>
-      <div class="code-sample">Door #,Room,Width,Height,Thk,Material,Type,Frame,Fire Rating,Glazing,HW Set,Comments
-101,LOBBY,6'-0",7'-0",1 3/4",ALUMINUM,VA1,ALUM,,1/4" CLR,7,MAIN ENTRANCE
-102,OFFICE,3'-0",7'-0",1 3/4",WOOD,FW1,HM,,,3,</div>
+      <div><strong>Door Schedule:</strong> PDF, CSV, TSV, Excel (.xlsx). Column headers are auto-detected.</div>
+      <div><strong>Floor Plan:</strong> PDF. Door numbers are extracted and compared against the door schedule.</div>
+      <div><strong>Hardware Spec:</strong> Upload on the Hardware tab (Section 08 7100 PDF).</div>
     </div>
   </div>
 
@@ -439,12 +443,23 @@
     <div id="report-content"></div>
   </div>
 
+  <!-- PROJECTS TAB -->
+  <div id="tab-projects" class="tab-panel hidden">
+    <div id="projects-content"></div>
+  </div>
+
   <!-- Sticky footer -->
   <div id="sticky-footer" class="sticky-footer hidden">
-    <button class="btn btn-primary btn-run" onclick="runReview()">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-      <span id="run-btn-text">Run Review</span>
-    </button>
+    <div style="display:flex;gap:8px;width:100%;max-width:600px;margin:0 auto">
+      <button class="btn btn-secondary btn-run" onclick="promptSaveProject()" style="flex:0 0 auto;background:#f0f0f0;color:#333">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save
+      </button>
+      <button class="btn btn-primary btn-run" onclick="runReview()" style="flex:1">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="run-btn-text">Run Review</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -463,6 +478,11 @@ const state = {
   loading: false,
   activeTab: 'upload',
   editingHwSet: null,
+  hwParseSource: null,
+  floorplanResult: null,
+  projectId: null,
+  projectName: '',
+  projectNotes: '',
 };
 
 // ─────────────────────────────────────────────
@@ -492,6 +512,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
   document.getElementById(`tab-${tab}`).classList.remove('hidden');
+  if (tab === 'projects') renderProjectsTab();
   updateFooter();
 }
 
@@ -622,6 +643,116 @@ function clearFile() {
 }
 
 // ─────────────────────────────────────────────
+// FLOOR PLAN UPLOAD
+// ─────────────────────────────────────────────
+
+function renderFpDropzone() {
+  const container = document.getElementById('fp-dropzone-container');
+  if (!container) return;
+
+  if (state.floorplanResult) {
+    const r = state.floorplanResult;
+    container.innerHTML = `
+      <div class="file-loaded">
+        <div class="file-info">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div>
+            <div class="file-name">${r.source}</div>
+            <div class="file-size">${r.doors_found} door numbers found</div>
+          </div>
+        </div>
+        <button class="file-clear" onclick="clearFpFile()">×</button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="dropzone" id="fp-dropzone">
+      <div class="dropzone-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <div class="dropzone-label">Floor Plan PDF</div>
+      <div class="dropzone-hint">${state.doors.length > 0 ? 'Upload to compare against door schedule' : 'Upload a door schedule first'}</div>
+      <input type="file" id="fp-file-input" accept=".pdf">
+    </div>
+  `;
+
+  const dz = document.getElementById('fp-dropzone');
+  const input = document.getElementById('fp-file-input');
+
+  dz.addEventListener('click', () => input.click());
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) handleFpFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', (e) => { if (e.target.files[0]) handleFpFile(e.target.files[0]); });
+}
+
+async function handleFpFile(file) {
+  document.getElementById('fp-parse-result').innerHTML = '<div class="alert alert-info">Extracting door numbers from floor plan... <span class="spinner"></span></div>';
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  // Send schedule door numbers for comparison
+  if (state.doors.length > 0) {
+    const doorNums = state.doors.map(d => d.door_number).filter(Boolean);
+    formData.append('schedule_doors', JSON.stringify(doorNums));
+  }
+
+  try {
+    const resp = await fetch('/api/compare-floorplan', { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    if (data.error) {
+      document.getElementById('fp-parse-result').innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+      return;
+    }
+
+    state.floorplanResult = data;
+    renderFpDropzone();
+
+    let html = `<div class="alert alert-success">Found <strong>${data.doors_found} door numbers</strong> on floor plan</div>`;
+
+    if (data.comparison) {
+      const c = data.comparison;
+      if (c.all_match) {
+        html += `<div class="alert alert-ok" style="margin-top:8px">All ${c.matched_count} door numbers match between floor plan and schedule</div>`;
+      } else {
+        if (c.on_schedule_not_plan.length > 0) {
+          html += `<div class="alert alert-error" style="margin-top:8px"><strong>On schedule but NOT on floor plan:</strong> ${c.on_schedule_not_plan.join(', ')}</div>`;
+        }
+        if (c.on_plan_not_schedule.length > 0) {
+          html += `<div class="alert alert-warning" style="margin-top:8px"><strong>On floor plan but NOT on schedule:</strong> ${c.on_plan_not_schedule.join(', ')}</div>`;
+        }
+        if (c.matched_count > 0) {
+          html += `<div style="font-size:12px;color:#666;margin-top:4px">${c.matched_count} doors matched</div>`;
+        }
+      }
+    }
+
+    document.getElementById('fp-parse-result').innerHTML = html;
+
+  } catch (err) {
+    document.getElementById('fp-parse-result').innerHTML = `<div class="alert alert-error">Upload failed: ${err.message}</div>`;
+  }
+}
+
+function clearFpFile() {
+  state.floorplanResult = null;
+  renderFpDropzone();
+  document.getElementById('fp-parse-result').innerHTML = '';
+}
+
+// ─────────────────────────────────────────────
 // DOORS TABLE
 // ─────────────────────────────────────────────
 
@@ -641,9 +772,33 @@ function renderDoorsTab() {
     return;
   }
 
+  // Dynamically determine which columns have data
+  const colDefs = [
+    { key: 'door_number', label: 'DOOR #', always: true },
+    { key: 'room_name', label: 'ROOM' },
+    { key: '_size', label: 'SIZE', always: true, render: d => d.width && d.height ? `${d.width} × ${d.height}` : '' },
+    { key: 'thickness', label: 'THK' },
+    { key: 'material', label: 'MATERIAL', always: true, render: d => (d._normalized_material || normalizeMaterial(d.material)).toUpperCase() },
+    { key: 'door_type', label: 'TYPE' },
+    { key: 'finish', label: 'FINISH' },
+    { key: 'frame_material', label: 'FRAME' },
+    { key: 'frame_finish', label: 'FR. FINISH' },
+    { key: 'fire_rating', label: 'FIRE' },
+    { key: 'glazing', label: 'GLAZING' },
+    { key: 'hardware_set', label: 'HW SET', always: true },
+  ];
+
+  // Only show columns that have at least one value (or are marked "always")
+  const activeCols = colDefs.filter(col => {
+    if (col.always) return true;
+    return state.doors.some(d => {
+      const val = d[col.key];
+      return val && val.toString().trim() !== '';
+    });
+  });
+
   let html = '<div class="table-wrap"><table class="door-table"><thead><tr>';
-  const cols = ['Door #', 'Room', 'Size', 'Material', 'Type', 'Frame', 'Fire', 'Glazing', 'HW Set'];
-  cols.forEach(c => html += `<th>${c}</th>`);
+  activeCols.forEach(c => html += `<th>${c.label}</th>`);
   html += '</tr></thead><tbody>';
 
   for (const d of state.doors) {
@@ -651,20 +806,24 @@ function renderDoorsTab() {
     const hasCrit = doorIssues.some(i => i.severity === 'critical');
     const hasWarn = doorIssues.some(i => i.severity === 'warning');
     const rowClass = hasCrit ? 'row-critical' : hasWarn ? 'row-warning' : '';
-    const mat = d._normalized_material || normalizeMaterial(d.material);
-    const size = d.width && d.height ? `${d.width} × ${d.height}` : '';
     const dot = hasCrit ? '<span class="dot-critical">●</span>' : hasWarn ? '<span class="dot-warning">●</span>' : '';
 
     html += `<tr class="${rowClass}">`;
-    html += `<td class="mono" style="font-weight:700">${d.door_number}${dot}</td>`;
-    html += `<td>${d.room_name || ''}</td>`;
-    html += `<td class="mono" style="font-size:11px">${size}</td>`;
-    html += `<td>${mat}</td>`;
-    html += `<td class="mono">${d.door_type || ''}</td>`;
-    html += `<td>${d.frame_material || ''}</td>`;
-    html += `<td style="color:${d.fire_rating ? 'var(--red-text)' : '#ccc'}">${d.fire_rating || '—'}</td>`;
-    html += `<td style="font-size:11px">${d.glazing || '—'}</td>`;
-    html += `<td class="mono" style="font-weight:600">${d.hardware_set || '—'}</td>`;
+    for (const col of activeCols) {
+      let val = col.render ? col.render(d) : (d[col.key] || '');
+      val = val.toString().trim();
+
+      // Special formatting per column
+      if (col.key === 'door_number') {
+        html += `<td style="font-weight:700">${val}${dot}</td>`;
+      } else if (col.key === 'hardware_set') {
+        html += `<td style="font-weight:600">${val || '—'}</td>`;
+      } else if (col.key === 'fire_rating') {
+        html += `<td style="color:${val ? 'var(--red-text)' : '#ccc'}">${val || '—'}</td>`;
+      } else {
+        html += `<td>${val || ''}</td>`;
+      }
+    }
     html += `</tr>`;
   }
 
@@ -684,25 +843,56 @@ function renderHardwareTab() {
   let html = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;letter-spacing:0.02em">HARDWARE SETS (${keys.length})</div>
-      <button class="btn btn-primary" onclick="startAddHwSet()">+ Add Set</button>
+      <div style="display:flex;gap:8px">
+        <label class="btn btn-primary" style="cursor:pointer;margin:0">
+          Upload 08 7100 PDF
+          <input type="file" accept=".pdf" style="display:none" onchange="uploadHardwarePDF(this)">
+        </label>
+        <button class="btn btn-secondary" onclick="startAddHwSet()">+ Add Manually</button>
+      </div>
     </div>
   `;
 
   if (keys.length === 0 && !state.editingHwSet) {
     html += `<div class="alert alert-warning" style="margin-top:0">
-      No hardware sets loaded yet. Add them manually above. Hardware-specific compatibility checks require hardware set data.
+      No hardware sets loaded. Upload a Section 08 71 00 Door Hardware PDF to auto-populate, or add sets manually.
+    </div>`;
+  }
+
+  if (state.hwParseSource) {
+    html += `<div class="alert alert-ok" style="margin-top:0;margin-bottom:12px">
+      Parsed from: <strong>${state.hwParseSource}</strong> — ${keys.length} hardware sets loaded
     </div>`;
   }
 
   for (const num of keys) {
     const s = sets[num];
-    const comps = (s.components || []).map(c => `${c.manufacturer} ${c.series}`.trim()).filter(Boolean).join(' · ');
+    // Build component summary from parsed data
+    let compSummary = '';
+    if (s.components && s.components.length) {
+      compSummary = s.components
+        .filter(c => c.description)
+        .map(c => {
+          let label = c.description;
+          if (c.series) label += ' ' + c.series;
+          else if (c.catalog_number) label += ' ' + c.catalog_number;
+          if (c.manufacturer && c.manufacturer.length <= 5) label += ' [' + c.manufacturer + ']';
+          return c.qty > 1 ? c.qty + '× ' + label : label;
+        })
+        .join(' · ');
+    }
+    const hasPanic = s.has_panic ? ' <span style="color:var(--red-text);font-size:10px;font-weight:600">PANIC</span>' : '';
+    const hasCloser = s.has_closer ? ' <span style="color:var(--green-text);font-size:10px;font-weight:600">CLOSER</span>' : '';
+
     html += `
       <div class="hw-set-card">
-        <div>
-          <span class="hw-set-num">Set ${num}</span>
-          <span class="hw-set-desc">${s.description || ''}</span>
-          <div class="hw-set-components">${comps || 'No components'}</div>
+        <div style="flex:1;min-width:0">
+          <div>
+            <span class="hw-set-num">Set ${num}</span>${hasPanic}${hasCloser}
+            <span class="hw-set-desc">${s.description || ''}</span>
+          </div>
+          <div class="hw-set-components" style="word-break:break-word">${compSummary || 'No components'}</div>
+          ${s.operational_description ? `<div style="font-size:10px;color:#888;margin-top:4px;font-style:italic">${s.operational_description.substring(0, 120)}${s.operational_description.length > 120 ? '...' : ''}</div>` : ''}
         </div>
         <div class="hw-set-actions">
           <button class="btn btn-secondary" onclick="editHwSet('${num}')">Edit</button>
@@ -730,6 +920,37 @@ function renderHardwareTab() {
   }
 
   container.innerHTML = html;
+}
+
+async function uploadHardwarePDF(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/api/parse-hardware', { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      alert(data.error || 'Hardware parsing failed');
+      return;
+    }
+
+    // New API returns hardware_sets as a dict keyed by set number
+    state.hardwareSets = data.hardware_sets;
+    state.hwParseSource = data.source || file.name;
+
+    renderHardwareTab();
+    updateCounts();
+    updateFooter();
+
+  } catch (err) {
+    alert('Upload failed: ' + err.message);
+  }
+
+  input.value = '';
 }
 
 function renderHwEditForm() {
@@ -989,6 +1210,191 @@ function renderIssueCard(issue, severity) {
 }
 
 // ─────────────────────────────────────────────
+// PROJECTS
+// ─────────────────────────────────────────────
+
+async function renderProjectsTab() {
+  const container = document.getElementById('projects-content');
+  container.innerHTML = '<div class="alert alert-info">Loading projects... <span class="spinner"></span></div>';
+
+  try {
+    const resp = await fetch('/api/projects');
+    const data = await resp.json();
+    const projects = data.projects || [];
+
+    let html = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:700;letter-spacing:0.02em">SAVED PROJECTS (${projects.length})</div>
+      </div>
+    `;
+
+    if (projects.length === 0) {
+      html += '<div class="center-msg">No saved projects yet. Upload a door schedule, then click Save.</div>';
+    }
+
+    for (const p of projects) {
+      const date = p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+      const issues = p.issue_count || 0;
+      const issueBadge = issues > 0 ? `<span style="background:var(--red-bg);color:var(--red-text);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${issues} issues</span>` : '';
+      const isCurrent = state.projectId === p.id;
+
+      html += `
+        <div class="hw-set-card" style="${isCurrent ? 'border-color:var(--green-strong);background:var(--green-bg)' : ''}">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-weight:700;font-size:14px">${p.name}</span>
+              ${isCurrent ? '<span style="color:var(--green-strong);font-size:10px;font-weight:600">CURRENT</span>' : ''}
+              ${issueBadge}
+            </div>
+            ${p.notes ? `<div style="font-size:11px;color:#888;margin-top:2px">${p.notes}</div>` : ''}
+            <div style="font-size:11px;color:#aaa;margin-top:4px">
+              ${p.door_count} doors · ${p.hw_set_count} HW sets · ${date}
+            </div>
+          </div>
+          <div class="hw-set-actions">
+            <button class="btn btn-primary" onclick="loadProject('${p.id}')" style="font-size:11px;padding:4px 12px">Open</button>
+            <button class="btn-danger" onclick="deleteProject('${p.id}','${p.name.replace(/'/g, "\\'")}')">🗑</button>
+          </div>
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div class="alert alert-error">Failed to load projects: ${err.message}</div>`;
+  }
+}
+
+function promptSaveProject() {
+  const name = prompt('Project name:', state.projectName || '');
+  if (!name) return;
+
+  const notes = prompt('Notes (optional):', state.projectNotes || '');
+  state.projectName = name;
+  state.projectNotes = notes || '';
+  saveProject();
+}
+
+async function saveProject() {
+  if (!state.projectName) {
+    promptSaveProject();
+    return;
+  }
+
+  const payload = {
+    id: state.projectId || null,
+    name: state.projectName,
+    notes: state.projectNotes,
+    doors: state.doors,
+    hardware_sets: state.hardwareSets,
+    issues: state.issues,
+    review_run: state.reviewRun,
+    parse_info: state.parseInfo,
+    hw_parse_source: state.hwParseSource,
+    floorplan_result: state.floorplanResult,
+  };
+
+  try {
+    const resp = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+
+    if (data.success) {
+      state.projectId = data.id;
+      setStatus(`Project "${state.projectName}" saved`, 'ok');
+      if (state.activeTab === 'projects') renderProjectsTab();
+    } else {
+      setStatus(data.error || 'Save failed', 'error');
+    }
+  } catch (err) {
+    setStatus('Save failed: ' + err.message, 'error');
+  }
+}
+
+async function loadProject(id) {
+  try {
+    const resp = await fetch(`/api/projects/${id}`);
+    const data = await resp.json();
+
+    if (!data.success) {
+      setStatus(data.error || 'Load failed', 'error');
+      return;
+    }
+
+    const p = data.project;
+    state.projectId = p.id;
+    state.projectName = p.name;
+    state.projectNotes = p.notes || '';
+    state.doors = p.doors || [];
+    state.hardwareSets = p.hardware_sets || {};
+    state.issues = p.issues || [];
+    state.reviewRun = p.review_run || false;
+    state.parseInfo = p.parse_info || null;
+    state.hwParseSource = p.hw_parse_source || null;
+    state.floorplanResult = p.floorplan_result || null;
+    state.file = null;
+
+    // Re-render everything
+    renderDropzone();
+    renderFpDropzone();
+    renderDoorsTab();
+    renderHardwareTab();
+    updateCounts();
+    updateFooter();
+
+    if (state.parseInfo && state.parseInfo.count) {
+      document.getElementById('parse-result').innerHTML = `<div class="alert alert-success">Loaded <strong>${state.doors.length} doors</strong> from project "${p.name}"</div>`;
+    }
+
+    if (state.reviewRun) {
+      renderReportTab({ issues: state.issues, door_count: state.doors.length });
+    }
+
+    setStatus(`Opened project "${p.name}"`, 'ok');
+    switchTab('doors');
+
+  } catch (err) {
+    setStatus('Load failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteProject(id, name) {
+  if (!confirm(`Delete project "${name}"? This cannot be undone.`)) return;
+
+  try {
+    const resp = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    const data = await resp.json();
+
+    if (data.success) {
+      if (state.projectId === id) {
+        state.projectId = null;
+        state.projectName = '';
+        state.projectNotes = '';
+      }
+      setStatus(`Project "${name}" deleted`, 'ok');
+      renderProjectsTab();
+    } else {
+      setStatus(data.error || 'Delete failed', 'error');
+    }
+  } catch (err) {
+    setStatus('Delete failed: ' + err.message, 'error');
+  }
+}
+
+function setStatus(msg, type) {
+  // Show a brief status message - reuse parse-result area or create a toast
+  const el = document.getElementById('parse-result');
+  if (el && (state.activeTab === 'upload' || state.activeTab === 'projects')) {
+    const cls = type === 'ok' ? 'alert-success' : type === 'error' ? 'alert-error' : 'alert-info';
+    el.innerHTML = `<div class="alert ${cls}">${msg}</div>`;
+    if (type === 'ok') setTimeout(() => { if (el.textContent.includes(msg)) el.innerHTML = ''; }, 3000);
+  }
+}
+
+// ─────────────────────────────────────────────
 // UI UPDATES
 // ─────────────────────────────────────────────
 
@@ -1012,6 +1418,15 @@ function updateCounts() {
 function updateFooter() {
   const footer = document.getElementById('sticky-footer');
   const btnText = document.getElementById('run-btn-text');
+  const subtitle = document.getElementById('app-subtitle');
+
+  // Update subtitle with project name
+  if (state.projectName) {
+    subtitle.innerHTML = `Project: <strong>${state.projectName}</strong>`;
+  } else {
+    subtitle.textContent = 'Upload door schedules · Add hardware sets · Get compatibility reports';
+  }
+
   if (state.doors.length > 0 && state.activeTab !== 'report') {
     footer.classList.remove('hidden');
     const hwCount = Object.keys(state.hardwareSets).length;
@@ -1022,10 +1437,12 @@ function updateFooter() {
 }
 
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
 
 renderDropzone();
+renderFpDropzone();
 renderDoorsTab();
 renderHardwareTab();
 renderReportTab({});

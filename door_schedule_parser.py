@@ -6,7 +6,7 @@ Extracts structured door data from PDF door schedules.
 Uses pdfplumber for table extraction. Handles common variations in 
 column naming, multi-page schedules, and merged cells.
 
-Built for: Me
+Built for: Middlesex Glass Company
 Author: Bryan (with Claude)
 """
 
@@ -434,9 +434,25 @@ class DoorScheduleParser:
                 source_file=pdf_path,
             )
 
-        # Map columns
+        # Map columns — try header-based first, fall back to data-pattern inference
         col_mapping = map_columns(headers)
-        self._log(f"Column mapping: {col_mapping}")
+        header_score = sum(1 for _ in col_mapping.values())
+        self._log(f"Header-based mapping: {header_score} columns matched")
+
+        # If header matching is weak (< 3 columns), try data-pattern inference
+        if header_score < 3 and all_rows:
+            self._log("Header matching weak — trying data-pattern inference")
+            inferred = self._infer_columns_from_data(all_rows)
+            if inferred and len(inferred) > header_score:
+                self._log(f"Data inference found {len(inferred)} columns — using it")
+                col_mapping = inferred
+                # Generate synthetic header names for display
+                field_to_label = {v: v.replace('_', ' ').title() for v in inferred.values()}
+                headers = [field_to_label.get(inferred.get(i, ''), headers[i] if i < len(headers) else '')
+                          for i in range(len(headers))]
+                warnings.append("Column headers were unreadable — columns inferred from data patterns")
+
+        self._log(f"Final column mapping: {col_mapping}")
 
         # Check for combined size column
         has_separate_wh = any(col_mapping.get(i) == "width" for i in col_mapping) and \
@@ -697,6 +713,139 @@ class DoorScheduleParser:
                     score += 1
                     break
         return score
+
+    def _infer_columns_from_data(self, data_rows: List[List]) -> Optional[Dict[int, str]]:
+        """
+        Infer column types from data patterns when headers are unreadable
+        (vertical text, garbled, missing, etc.)
+
+        Rules (from Bryan's domain expertise):
+        - Door number: 3+ digit number or letter/number combo (101, 100A, A-101)
+        - Dimensions: contain ' or " punctuation, often in X'-Y" format
+        - Material: short letter codes (AL, WD, HM, GL) — 2-3 chars, all alpha
+        - Door type: single or double letters (A, B, C, D)
+        - Hardware set: 1-2 digit number, present in EVERY row (key distinguisher)
+        - Fire rating: number or text, but NOT present in every row
+        - Thickness: contains fractions (1 3/4") or is a small decimal
+        - Finish: text like STAINED, PTD, PAINTED
+        """
+        if not data_rows or len(data_rows) < 3:
+            return None
+
+        col_count = len(data_rows[0])
+        if col_count < 3:
+            return None
+
+        # Analyze each column across all rows
+        col_profiles = []
+        for col_idx in range(col_count):
+            values = []
+            for row in data_rows:
+                v = str(row[col_idx] or '').strip() if col_idx < len(row) else ''
+                values.append(v)
+
+            non_empty = [v for v in values if v]
+            fill_rate = len(non_empty) / len(values) if values else 0
+
+            profile = {
+                'idx': col_idx,
+                'fill_rate': fill_rate,
+                'values': values,
+                'non_empty': non_empty,
+                'has_dimensions': any(("'" in v or "'-" in v) and '"' in v for v in non_empty),
+                'has_fractions': any(re.search(r'\d+\s+\d+/\d+', v) for v in non_empty),
+                'all_short_alpha': all(re.match(r'^[A-Za-z]{1,4}$', v) for v in non_empty) if non_empty else False,
+                'all_1_2_digit_nums': all(re.match(r'^\d{1,2}$', v) for v in non_empty) if non_empty else False,
+                'has_3plus_digit_nums': any(re.match(r'^\d{3,}[A-Za-z]?$', v) or
+                                            re.match(r'^[A-Za-z]?\d{2,}[A-Za-z]?$', v) for v in non_empty),
+                'all_text': all(re.match(r'^[A-Za-z\s]+$', v) for v in non_empty) if non_empty else False,
+                'is_material_like': all(v.upper() in ['AL', 'WD', 'HM', 'GL', 'STL', 'ALUMINUM',
+                    'WOOD', 'HOLLOW METAL', 'GLASS', 'STEEL', 'HM', 'ALUM'] for v in non_empty) if non_empty else False,
+                'is_finish_like': all(v.upper() in ['STAINED', 'PTD', 'PAINTED', 'PRIMED',
+                    'ANODIZED', 'CLEAR', 'BRONZE', 'KYNAR', 'FACTORY', ''] for v in non_empty) if non_empty else False,
+            }
+            col_profiles.append(profile)
+
+        # Now assign columns based on patterns
+        mapping = {}
+        used = set()
+
+        # Pass 1: Door number — first column with 3+ digit numbers or alphanumeric combos
+        for p in col_profiles:
+            if p['idx'] not in used and p['has_3plus_digit_nums'] and p['fill_rate'] > 0.8:
+                mapping[p['idx']] = 'door_number'
+                used.add(p['idx'])
+                break
+
+        # Pass 2: Dimensions — columns with architectural notation
+        dim_cols = [p for p in col_profiles if p['idx'] not in used and p['has_dimensions']]
+        if len(dim_cols) >= 2:
+            mapping[dim_cols[0]['idx']] = 'width'
+            mapping[dim_cols[1]['idx']] = 'height'
+            used.add(dim_cols[0]['idx'])
+            used.add(dim_cols[1]['idx'])
+        elif len(dim_cols) == 1:
+            mapping[dim_cols[0]['idx']] = 'width'
+            used.add(dim_cols[0]['idx'])
+
+        # Pass 3: Thickness — has fractions (1 3/4") but not dimensions
+        for p in col_profiles:
+            if p['idx'] not in used and p['has_fractions'] and not p['has_dimensions']:
+                mapping[p['idx']] = 'thickness'
+                used.add(p['idx'])
+                break
+
+        # Pass 4: Material columns — short alpha codes matching known materials
+        mat_cols = [p for p in col_profiles if p['idx'] not in used and p['is_material_like'] and p['fill_rate'] > 0.5]
+        if mat_cols:
+            mapping[mat_cols[0]['idx']] = 'material'
+            used.add(mat_cols[0]['idx'])
+            if len(mat_cols) >= 2:
+                mapping[mat_cols[1]['idx']] = 'frame_material'
+                used.add(mat_cols[1]['idx'])
+
+        # Pass 5: Hardware set — 1-2 digit numbers present in every (or nearly every) row
+        hw_candidates = [p for p in col_profiles
+                        if p['idx'] not in used
+                        and p['all_1_2_digit_nums']
+                        and p['fill_rate'] > 0.85]
+        # If multiple candidates, pick the one with highest fill rate
+        # (hardware is in every row; fire rating is not)
+        if hw_candidates:
+            hw_candidates.sort(key=lambda p: p['fill_rate'], reverse=True)
+            mapping[hw_candidates[0]['idx']] = 'hardware_set'
+            used.add(hw_candidates[0]['idx'])
+            # Second candidate with lower fill rate might be fire rating
+            if len(hw_candidates) >= 2 and hw_candidates[1]['fill_rate'] < hw_candidates[0]['fill_rate']:
+                mapping[hw_candidates[1]['idx']] = 'fire_rating'
+                used.add(hw_candidates[1]['idx'])
+
+        # Pass 6: Door type — short alpha codes (A, B, C, D) or STOREFRONT etc.
+        for p in col_profiles:
+            if p['idx'] not in used and p['all_short_alpha'] and p['fill_rate'] > 0.8:
+                # Distinguish from material by checking if values are single letters
+                vals = set(v.upper() for v in p['non_empty'])
+                if all(len(v) <= 2 for v in vals) or any(v in ['STOREFRONT', 'STORE'] for v in vals):
+                    mapping[p['idx']] = 'door_type'
+                    used.add(p['idx'])
+                    break
+
+        # Pass 7: Finish columns
+        finish_cols = [p for p in col_profiles if p['idx'] not in used and p['is_finish_like'] and p['fill_rate'] > 0.3]
+        if finish_cols:
+            mapping[finish_cols[0]['idx']] = 'finish'
+            used.add(finish_cols[0]['idx'])
+            if len(finish_cols) >= 2:
+                mapping[finish_cols[1]['idx']] = 'frame_finish'
+                used.add(finish_cols[1]['idx'])
+
+        self._log(f"Data-pattern inference mapped {len(mapping)} columns: {mapping}")
+
+        # Only return if we found at least door_number and one other useful column
+        if 'door_number' in mapping.values() and len(mapping) >= 3:
+            return mapping
+
+        return None
 
     def _find_header_row(self, table: List[List]) -> Optional[List]:
         """
