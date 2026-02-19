@@ -483,6 +483,7 @@ const state = {
   projectId: null,
   projectName: '',
   projectNotes: '',
+  doorFilters: {},
 };
 
 // ─────────────────────────────────────────────
@@ -772,6 +773,9 @@ function renderDoorsTab() {
     return;
   }
 
+  // Initialize filters if needed
+  if (!state.doorFilters) state.doorFilters = {};
+
   // Dynamically determine which columns have data
   const colDefs = [
     { key: 'door_number', label: 'DOOR #', always: true },
@@ -797,11 +801,73 @@ function renderDoorsTab() {
     });
   });
 
-  let html = '<div class="table-wrap"><table class="door-table"><thead><tr>';
+  // Get cell value for a door + column
+  function cellVal(d, col) {
+    if (col.render) return col.render(d);
+    return (d[col.key] || '').toString().trim();
+  }
+
+  // Build unique values per column for filters
+  const filterOptions = {};
+  for (const col of activeCols) {
+    const vals = new Set();
+    for (const d of state.doors) {
+      const v = cellVal(d, col);
+      if (v) vals.add(v);
+    }
+    filterOptions[col.key] = [...vals].sort();
+  }
+
+  // Apply filters to get visible doors
+  const filteredDoors = state.doors.filter(d => {
+    for (const col of activeCols) {
+      const f = state.doorFilters[col.key];
+      if (f && f !== '') {
+        const v = cellVal(d, col);
+        if (v !== f) return false;
+      }
+    }
+    return true;
+  });
+
+  const activeFilterCount = Object.values(state.doorFilters).filter(v => v && v !== '').length;
+
+  let html = '';
+
+  // Filter bar
+  if (activeFilterCount > 0) {
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:11px;color:#888">Showing ${filteredDoors.length} of ${state.doors.length} doors (${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''} active)</span>
+      <button style="font-size:11px;color:var(--red-text);background:none;border:none;cursor:pointer;text-decoration:underline" onclick="clearDoorFilters()">Clear filters</button>
+    </div>`;
+  }
+
+  html += '<div class="table-wrap"><table class="door-table"><thead>';
+
+  // Filter row
+  html += '<tr style="background:#f8f8f8">';
+  activeCols.forEach(c => {
+    const opts = filterOptions[c.key] || [];
+    const curVal = state.doorFilters[c.key] || '';
+    if (opts.length > 1) {
+      html += `<th style="padding:2px 3px"><select style="width:100%;font-size:10px;padding:2px;border:1px solid #ddd;border-radius:3px;background:#fff" onchange="setDoorFilter('${c.key}',this.value)">`;
+      html += `<option value="">All</option>`;
+      for (const o of opts) {
+        html += `<option value="${o.replace(/"/g, '&quot;')}" ${curVal === o ? 'selected' : ''}>${o}</option>`;
+      }
+      html += `</select></th>`;
+    } else {
+      html += '<th style="padding:2px 3px"></th>';
+    }
+  });
+  html += '</tr>';
+
+  // Header row
+  html += '<tr>';
   activeCols.forEach(c => html += `<th>${c.label}</th>`);
   html += '</tr></thead><tbody>';
 
-  for (const d of state.doors) {
+  for (const d of filteredDoors) {
     const doorIssues = state.issues.filter(i => i.door_number === d.door_number);
     const hasCrit = doorIssues.some(i => i.severity === 'critical');
     const hasWarn = doorIssues.some(i => i.severity === 'warning');
@@ -810,10 +876,8 @@ function renderDoorsTab() {
 
     html += `<tr class="${rowClass}">`;
     for (const col of activeCols) {
-      let val = col.render ? col.render(d) : (d[col.key] || '');
-      val = val.toString().trim();
+      let val = cellVal(d, col);
 
-      // Special formatting per column
       if (col.key === 'door_number') {
         html += `<td style="font-weight:700">${val}${dot}</td>`;
       } else if (col.key === 'hardware_set') {
@@ -829,6 +893,17 @@ function renderDoorsTab() {
 
   html += '</tbody></table></div>';
   container.innerHTML = html;
+}
+
+function setDoorFilter(key, value) {
+  if (!state.doorFilters) state.doorFilters = {};
+  state.doorFilters[key] = value;
+  renderDoorsTab();
+}
+
+function clearDoorFilters() {
+  state.doorFilters = {};
+  renderDoorsTab();
 }
 
 // ─────────────────────────────────────────────
@@ -1140,6 +1215,35 @@ function renderReportTab(data) {
 
   let html = '';
 
+  // Print Report button
+  html += `<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+    <button class="btn btn-primary" onclick="togglePrintOptions()" style="font-size:12px;padding:6px 14px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      Print PDF Report
+    </button>
+  </div>`;
+
+  // Print options panel (hidden by default)
+  html += `<div id="print-options" class="hw-edit-form" style="display:none;margin-bottom:16px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">Report Contents</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="rpt-issues" checked> Compatibility Issues
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="rpt-schedule" checked> Door Schedule Table
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="rpt-hardware"> Hardware Sets
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="rpt-cost" checked> Cost Impact Estimates
+    </label>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-secondary" onclick="togglePrintOptions()" style="font-size:12px">Cancel</button>
+      <button class="btn btn-primary" onclick="downloadReport()" style="font-size:12px">Download PDF</button>
+    </div>
+  </div>`;
+
   // Summary cards
   html += '<div class="summary-grid">';
   html += `<div class="summary-card"><div class="number">${summary.total_doors}</div><div class="label">Doors Reviewed</div></div>`;
@@ -1207,6 +1311,54 @@ function renderIssueCard(issue, severity) {
       ${issue.solutions?.length > 0 ? `<div class="issue-solutions"><strong>Solutions:</strong> ${issue.solutions.join(' · ')}</div>` : ''}
     </div>
   `;
+}
+
+// ─────────────────────────────────────────────
+// PDF REPORT
+// ─────────────────────────────────────────────
+
+function togglePrintOptions() {
+  const el = document.getElementById('print-options');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function downloadReport() {
+  const payload = {
+    project_name: state.projectName || 'Door Review Report',
+    project_notes: state.projectNotes || '',
+    doors: state.doors,
+    issues: state.issues,
+    hardware_sets: state.hardwareSets,
+    include_issues: document.getElementById('rpt-issues')?.checked ?? true,
+    include_schedule: document.getElementById('rpt-schedule')?.checked ?? true,
+    include_hardware: document.getElementById('rpt-hardware')?.checked ?? false,
+    include_cost: document.getElementById('rpt-cost')?.checked ?? true,
+  };
+
+  try {
+    const resp = await fetch('/api/generate-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.error || 'Report generation failed');
+      return;
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(state.projectName || 'Door_Review').replace(/\s+/g, '_')}_Report.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    togglePrintOptions();
+  } catch (err) {
+    alert('Report generation failed: ' + err.message);
+  }
 }
 
 // ─────────────────────────────────────────────

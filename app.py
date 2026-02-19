@@ -501,6 +501,206 @@ def compare_floorplan():
 
 
 # ─────────────────────────────────────────────
+# API: Generate PDF Report
+# ─────────────────────────────────────────────
+
+@app.route('/api/generate-report', methods=['POST'])
+def generate_report():
+    """Generate a printable PDF report with selected content."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import io
+
+    # Options
+    include_schedule = data.get('include_schedule', True)
+    include_issues = data.get('include_issues', True)
+    include_hardware = data.get('include_hardware', False)
+    include_cost = data.get('include_cost', True)
+    project_name = data.get('project_name', 'Door Review Report')
+    project_notes = data.get('project_notes', '')
+    doors = data.get('doors', [])
+    issues = data.get('issues', [])
+    hardware_sets = data.get('hardware_sets', {})
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch,
+                            leftMargin=0.5*inch, rightMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    styles.add(ParagraphStyle('ReportTitle', parent=styles['Title'], fontSize=18, spaceAfter=6))
+    styles.add(ParagraphStyle('SectionHead', parent=styles['Heading2'], fontSize=13,
+                              textColor=colors.HexColor('#333'), spaceBefore=16, spaceAfter=8))
+    styles.add(ParagraphStyle('SmallText', parent=styles['Normal'], fontSize=8, textColor=colors.grey))
+    styles.add(ParagraphStyle('IssueText', parent=styles['Normal'], fontSize=9, leading=12))
+
+    story = []
+
+    # Header
+    story.append(Paragraph(project_name, styles['ReportTitle']))
+    if project_notes:
+        story.append(Paragraph(project_notes, styles['Normal']))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", styles['SmallText']))
+    story.append(Spacer(1, 12))
+
+    # Summary
+    critical = [i for i in issues if i.get('severity') == 'critical']
+    warnings = [i for i in issues if i.get('severity') == 'warning']
+    clean = len(doors) - len(set(i.get('door_number') for i in issues))
+
+    summary_data = [
+        ['Doors Reviewed', 'Critical Issues', 'Warnings', 'Clean'],
+        [str(len(doors)), str(len(critical)), str(len(warnings)), str(max(0, clean))],
+    ]
+    summary_table = Table(summary_data, colWidths=[1.8*inch]*4)
+    summary_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 8),
+        ('FONTSIZE', (0, 1), (-1, 1), 18),
+        ('TEXTCOLOR', (1, 1), (1, 1), colors.red if critical else colors.HexColor('#2e7d32')),
+        ('TEXTCOLOR', (2, 1), (2, 1), colors.HexColor('#e65100') if warnings else colors.HexColor('#2e7d32')),
+        ('TEXTCOLOR', (3, 1), (3, 1), colors.HexColor('#2e7d32')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#ddd')),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 16))
+
+    # Issues section
+    if include_issues and issues:
+        story.append(Paragraph('Compatibility Issues', styles['SectionHead']))
+
+        for issue in sorted(issues, key=lambda i: (0 if i.get('severity') == 'critical' else 1, i.get('door_number', ''))):
+            sev = issue.get('severity', 'info').upper()
+            door = issue.get('door_number', '?')
+            desc = issue.get('description', '')
+            details = issue.get('details', '')
+            cost = issue.get('cost_if_missed', '')
+            solutions = issue.get('solutions', [])
+
+            sev_color = colors.red if sev == 'CRITICAL' else colors.HexColor('#e65100')
+            text = f"<b><font color='{sev_color}'>[{sev}]</font> Door {door}</b>"
+            if cost and include_cost:
+                text += f"  <font color='grey'>({cost})</font>"
+            text += f"<br/>{desc}"
+            if details:
+                text += f"<br/><font size='8' color='grey'>{details}</font>"
+            if solutions:
+                text += f"<br/><font size='8'><b>Solutions:</b> {' | '.join(solutions)}</font>"
+
+            story.append(Paragraph(text, styles['IssueText']))
+            story.append(Spacer(1, 6))
+
+    # Cost impact
+    if include_cost and critical:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph('Cost Impact', styles['SectionHead']))
+        story.append(Paragraph("<font color='#2e7d32'><b>Caught at submittal review: $0 to fix</b></font>", styles['IssueText']))
+        story.append(Paragraph("<font color='red'><b>If discovered during fabrication/installation:</b></font>", styles['IssueText']))
+        for issue in critical:
+            if issue.get('cost_if_missed'):
+                story.append(Paragraph(f"  Door {issue['door_number']}: {issue['cost_if_missed']}", styles['IssueText']))
+
+    # Door schedule table
+    if include_schedule and doors:
+        story.append(PageBreak())
+        story.append(Paragraph('Door Schedule', styles['SectionHead']))
+
+        # Build table with key columns
+        headers = ['Door #', 'Size', 'Material', 'HW Set']
+        has_type = any(d.get('door_type') for d in doors)
+        has_fire = any(d.get('fire_rating') for d in doors)
+        has_finish = any(d.get('finish') for d in doors)
+        has_frame = any(d.get('frame_material') for d in doors)
+        if has_type: headers.insert(2, 'Type')
+        if has_finish: headers.insert(-1, 'Finish')
+        if has_frame: headers.insert(-1, 'Frame')
+        if has_fire: headers.insert(-1, 'Fire')
+
+        table_data = [headers]
+        for d in doors:
+            size = f"{d.get('width', '')} x {d.get('height', '')}".strip(' x')
+            row = [d.get('door_number', ''), size, (d.get('material', '') or '').upper(), d.get('hardware_set', '')]
+            if has_type: row.insert(2, d.get('door_type', ''))
+            if has_finish: row.insert(-1, d.get('finish', ''))
+            if has_frame: row.insert(-1, d.get('frame_material', ''))
+            if has_fire: row.insert(-1, d.get('fire_rating', ''))
+            table_data.append(row)
+
+        col_count = len(headers)
+        col_w = min(1.4, 7.0 / col_count) * inch
+        sched_table = Table(table_data, colWidths=[col_w] * col_count, repeatRows=1)
+        sched_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#ccc')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+        ]))
+
+        # Highlight rows with issues
+        door_issues = {}
+        for issue in issues:
+            dn = issue.get('door_number', '')
+            if dn not in door_issues:
+                door_issues[dn] = issue.get('severity', 'info')
+            elif issue.get('severity') == 'critical':
+                door_issues[dn] = 'critical'
+
+        for idx, d in enumerate(doors):
+            dn = d.get('door_number', '')
+            if dn in door_issues:
+                row_idx = idx + 1
+                bg = colors.HexColor('#fce4e4') if door_issues[dn] == 'critical' else colors.HexColor('#fff3e0')
+                sched_table.setStyle(TableStyle([('BACKGROUND', (0, row_idx), (-1, row_idx), bg)]))
+
+        story.append(sched_table)
+
+    # Hardware sets
+    if include_hardware and hardware_sets:
+        story.append(PageBreak())
+        story.append(Paragraph('Hardware Sets', styles['SectionHead']))
+
+        for num in sorted(hardware_sets.keys(), key=lambda x: int(x) if x.isdigit() else 999):
+            hw = hardware_sets[num]
+            desc = hw.get('description', '')
+            story.append(Paragraph(f"<b>Set #{num}</b> - {desc}", styles['IssueText']))
+            comps = hw.get('components', [])
+            for c in comps:
+                cdesc = c.get('description', '')
+                cat = c.get('catalog_number', '')
+                mfr = c.get('manufacturer', '')
+                qty = c.get('qty', 1)
+                line = f"  {qty}x {cdesc}"
+                if cat: line += f" {cat}"
+                if mfr: line += f" ({mfr})"
+                story.append(Paragraph(line, styles['SmallText']))
+            story.append(Spacer(1, 8))
+
+    # Build
+    doc.build(story)
+    buf.seek(0)
+
+    from flask import send_file
+    return send_file(buf, mimetype='application/pdf',
+                     download_name=f"{project_name.replace(' ', '_')}_Report.pdf",
+                     as_attachment=True)
+
+
+# ─────────────────────────────────────────────
 # API: Health Check
 # ─────────────────────────────────────────────
 
