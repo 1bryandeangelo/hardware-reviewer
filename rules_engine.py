@@ -28,12 +28,12 @@ except ImportError:
 
 @dataclass
 class Rule:
-    """A single rule from the FenestrAI Rules sheet."""
+    """A single rule from the rules spreadsheet."""
     rule_id: str
     category: str
     condition: str
     threshold: str
-    severity: str           # Critical, Moderate, Warning, Advisory
+    severity: str           # Critical, Warning, Advisory, Info
     code_reference: str
     trigger_element: str    # Door, Glazing, Hardware, Floor
     applies_to: str         # Both, Exterior, Interior
@@ -41,6 +41,7 @@ class Rule:
     failure_likelihood: str
     fix_recommendation: str
     notes: str
+    trigger_flags: str = ""  # e.g. "egress=true, ada_required=true"
 
     def matches_door_context(self, door_material: str, door_location: str = "",
                               has_glazing: bool = False, has_panic: bool = False,
@@ -140,18 +141,30 @@ class RulesEngine:
         try:
             xls = pd.ExcelFile(filepath)
 
-            # Load FenestrAI Rules sheet
-            if "FenestrAI Rules" in xls.sheet_names:
-                self._load_rules_sheet(xls)
-            else:
-                # Try first sheet
-                self._load_rules_sheet(xls, sheet_name=0)
-
-            # Load Aluminum Door Stile Widths sheet
+            # Identify stile widths sheet
+            stile_sheet = None
             for name in xls.sheet_names:
                 if "stile" in name.lower() or "aluminum" in name.lower() or "width" in name.lower():
-                    self._load_stile_sheet(xls, sheet_name=name)
+                    stile_sheet = name
                     break
+
+            # Load rules from all sheets (old single-sheet or new multi-tab format)
+            if "FenestrAI Rules" in xls.sheet_names:
+                # Old format: single rules sheet
+                self._load_rules_sheet(xls, sheet_name="FenestrAI Rules")
+            else:
+                # New format: load every sheet except stile widths as a rules tab
+                for name in xls.sheet_names:
+                    if name == stile_sheet:
+                        continue
+                    try:
+                        self._load_rules_sheet(xls, sheet_name=name)
+                    except Exception as e:
+                        self.load_errors.append(f"Error loading tab '{name}': {str(e)}")
+
+            # Load stile widths
+            if stile_sheet:
+                self._load_stile_sheet(xls, sheet_name=stile_sheet)
 
             self.loaded = True
             return True
@@ -161,26 +174,24 @@ class RulesEngine:
             return False
 
     def _load_rules_sheet(self, xls, sheet_name="FenestrAI Rules"):
-        """Parse the rules sheet into Rule objects."""
+        """Parse the rules sheet into Rule objects. Handles both old and new column formats."""
         df = pd.read_excel(xls, sheet_name=sheet_name, dtype=str).fillna("")
 
-        # Normalize column names
+        # Normalize column names - handle both old format and new simplified format
         col_map = {}
         for col in df.columns:
             cl = str(col).lower().strip()
             if "rule" in cl and "id" in cl:
                 col_map["rule_id"] = col
-            elif "category" in cl:
-                col_map["category"] = col
-            elif "condition" in cl:
+            elif cl == "what to check" or "condition" in cl:
                 col_map["condition"] = col
-            elif "threshold" in cl:
+            elif cl == "fail when" or "threshold" in cl:
                 col_map["threshold"] = col
             elif "severity" in cl:
                 col_map["severity"] = col
-            elif "code" in cl and "ref" in cl:
+            elif cl == "code ref" or ("code" in cl and "ref" in cl):
                 col_map["code_reference"] = col
-            elif "trigger" in cl:
+            elif "trigger" in cl and "element" in cl:
                 col_map["trigger_element"] = col
             elif "applies" in cl:
                 col_map["applies_to"] = col
@@ -188,8 +199,10 @@ class RulesEngine:
                 col_map["confidence"] = col
             elif "failure" in cl or "likelihood" in cl:
                 col_map["failure_likelihood"] = col
-            elif "fix" in cl or "recommendation" in cl:
+            elif cl == "how to fix" or "fix" in cl or "recommendation" in cl:
                 col_map["fix_recommendation"] = col
+            elif cl == "when to apply" or ("trigger" in cl and "flag" in cl):
+                col_map["trigger_flags"] = col
             elif "note" in cl:
                 col_map["notes"] = col
 
@@ -200,7 +213,7 @@ class RulesEngine:
 
             rule = Rule(
                 rule_id=rule_id,
-                category=str(row.get(col_map.get("category", ""), "")).strip(),
+                category=sheet_name if sheet_name != "FenestrAI Rules" else str(row.get(col_map.get("category", ""), "")).strip(),
                 condition=str(row.get(col_map.get("condition", ""), "")).strip(),
                 threshold=str(row.get(col_map.get("threshold", ""), "")).strip(),
                 severity=str(row.get(col_map.get("severity", ""), "")).strip(),
@@ -211,6 +224,7 @@ class RulesEngine:
                 failure_likelihood=str(row.get(col_map.get("failure_likelihood", ""), "")).strip(),
                 fix_recommendation=str(row.get(col_map.get("fix_recommendation", ""), "")).strip(),
                 notes=str(row.get(col_map.get("notes", ""), "")).strip(),
+                trigger_flags=str(row.get(col_map.get("trigger_flags", ""), "")).strip(),
             )
             self.rules.append(rule)
 
