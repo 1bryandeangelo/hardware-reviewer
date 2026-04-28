@@ -572,6 +572,37 @@ class DoorScheduleParser:
             source_file=pdf_path,
         )
 
+    def _table_has_schedule_title(self, table: List[List]) -> bool:
+        """Return True if a table's first 3 rows contain a 'DOOR SCHEDULE' label."""
+        for row in table[:3]:
+            for cell in row:
+                if cell and "DOOR SCHEDULE" in str(cell).upper().replace("\n", " "):
+                    return True
+        return False
+
+    def _merge_schedule_results(self, schedules: List[tuple]) -> Optional[tuple]:
+        """
+        Merge multiple (headers, data_rows) pairs into one.
+        Headers come from the first schedule; data rows from all are combined.
+        Rows are padded/trimmed to match the first schedule's column count.
+        """
+        if not schedules:
+            return None
+        if len(schedules) == 1:
+            return schedules[0]
+
+        headers, combined = schedules[0]
+        col_count = len(headers)
+        for _, rows in schedules[1:]:
+            for row in rows:
+                if len(row) < col_count:
+                    row = row + [''] * (col_count - len(row))
+                elif len(row) > col_count:
+                    row = row[:col_count]
+                combined.append(row)
+        self._log(f"Merged {len(schedules)} door schedules into {len(combined)} rows")
+        return (headers, combined)
+
     def _find_door_schedule_tables(self, tables: List[List[List]]) -> Optional[tuple]:
         """
         Find the door schedule among multiple tables on a page.
@@ -581,25 +612,29 @@ class DoorScheduleParser:
         plus the headers may be in a separate table from the data.
 
         Strategy:
-        1. Look for a table containing "DOOR SCHEDULE" — that's the header table
+        1. Collect ALL tables containing "DOOR SCHEDULE" — handles sheets with
+           multiple schedules (e.g. unit doors + common area doors on one sheet)
         2. Merge multi-row headers into a single header row
         3. If data rows are in the same table, use them
         4. If not, find the next table with matching column count — that's the data
+        5. Fall back to best header-score match if no titled schedule found
 
         Returns:
             (merged_headers, data_rows) or None if not found
         """
-        # Strategy 1: Find a table with "DOOR SCHEDULE" title
+        # Strategy 1: Collect ALL tables with "DOOR SCHEDULE" title
+        found_schedules = []
         for t_idx, table in enumerate(tables):
             if not table:
                 continue
-            for row in table[:3]:  # Check first 3 rows for a title
-                for cell in row:
-                    if cell and "DOOR SCHEDULE" in str(cell).upper().replace("\n", " "):
-                        self._log(f"Found 'DOOR SCHEDULE' in table {t_idx}")
-                        result = self._extract_from_door_schedule_table(table, t_idx, tables)
-                        if result:
-                            return result
+            if self._table_has_schedule_title(table):
+                self._log(f"Found 'DOOR SCHEDULE' in table {t_idx}")
+                result = self._extract_from_door_schedule_table(table, t_idx, tables)
+                if result:
+                    found_schedules.append(result)
+
+        if found_schedules:
+            return self._merge_schedule_results(found_schedules)
 
         # Strategy 2: No "DOOR SCHEDULE" label — find the table with the most
         # recognized column headers (the old approach, improved)
