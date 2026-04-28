@@ -13,6 +13,10 @@ Author: Bryan (with Claude)
 import re
 import json
 from typing import Dict, List, Optional, Tuple, Any
+
+# Matches "DOOR SCHEDULE", "DOOR AND FRAME SCHEDULE", "DOOR & FRAME SCHEDULE",
+# "DOOR/FRAME SCHEDULE", etc. — up to 25 chars between DOOR and SCHEDULE.
+_SCHEDULE_TITLE_RE = re.compile(r'DOOR\b.{0,25}SCHEDULE', re.IGNORECASE)
 from dataclasses import dataclass, field, asdict
 
 try:
@@ -573,10 +577,14 @@ class DoorScheduleParser:
         )
 
     def _table_has_schedule_title(self, table: List[List]) -> bool:
-        """Return True if a table's first 3 rows contain a 'DOOR SCHEDULE' label."""
+        """Return True if a table's first 3 rows contain a door schedule label.
+
+        Matches: "DOOR SCHEDULE", "DOOR AND FRAME SCHEDULE - UNIT",
+        "DOOR AND FRAME SCHEDULE - COMMON", "DOOR & FRAME SCHEDULE", etc.
+        """
         for row in table[:3]:
             for cell in row:
-                if cell and "DOOR SCHEDULE" in str(cell).upper().replace("\n", " "):
+                if cell and _SCHEDULE_TITLE_RE.search(str(cell).replace("\n", " ")):
                     return True
         return False
 
