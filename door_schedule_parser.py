@@ -352,6 +352,69 @@ class DoorScheduleParser:
 
     # ── PDF Extraction ──
 
+    # ── Table extraction strategies ──
+
+    _TEXT_TABLE_SETTINGS = {
+        "vertical_strategy": "text",
+        "horizontal_strategy": "text",
+        "snap_tolerance": 5,
+        "snap_x_tolerance": 5,
+        "snap_y_tolerance": 5,
+        "join_tolerance": 5,
+        "join_x_tolerance": 5,
+        "join_y_tolerance": 5,
+        "edge_min_length": 3,
+        "min_words_vertical": 3,
+        "min_words_horizontal": 1,
+    }
+
+    _LINES_TEXT_SETTINGS = {
+        "vertical_strategy": "lines",
+        "horizontal_strategy": "text",
+        "snap_tolerance": 10,
+        "join_tolerance": 10,
+        "edge_min_length": 3,
+        "min_words_horizontal": 1,
+    }
+
+    def _extract_tables_with_fallback(self, page, warnings: List[str]) -> List[List[List]]:
+        """
+        Try progressively looser table extraction strategies.
+
+        pdfplumber's default ("lines") strategy relies on visible PDF line objects.
+        CAD-exported and small-text door schedules often have no explicit borders —
+        columns are implied by text alignment only. The "text" strategy handles those.
+        """
+        tables = page.extract_tables()
+        if tables:
+            return tables
+
+        # Strategy 2: text-alignment-based (handles CAD exports, no-border tables)
+        try:
+            tables = page.extract_tables(table_settings=self._TEXT_TABLE_SETTINGS)
+            if tables:
+                self._log("Text-strategy table extraction succeeded")
+                return tables
+        except Exception as e:
+            self._log(f"Text strategy error: {e}")
+
+        # Strategy 3: vertical lines + horizontal text
+        try:
+            tables = page.extract_tables(table_settings=self._LINES_TEXT_SETTINGS)
+            if tables:
+                self._log("Mixed-strategy table extraction succeeded")
+                return tables
+        except Exception as e:
+            self._log(f"Mixed strategy error: {e}")
+
+        return []
+
+    def _is_likely_scanned(self, pdf) -> bool:
+        """Return True if the PDF appears to be a scanned image with no embedded text."""
+        sample = min(3, len(pdf.pages))
+        chars = sum(len((pdf.pages[i].extract_text() or "").strip()) for i in range(sample))
+        return chars / sample < 50
+
     def parse_pdf(self, pdf_path: str) -> ParseResult:
         """
         Parse a door schedule PDF and return structured door data.
@@ -362,6 +425,7 @@ class DoorScheduleParser:
         - Headers split into a separate table from the data rows
         - "DOOR SCHEDULE" title row above the actual column headers
         - Continuation tables on subsequent pages
+        - No-border tables (text-alignment-only, common in CAD exports)
 
         Args:
             pdf_path: Path to the door schedule PDF
@@ -381,11 +445,25 @@ class DoorScheduleParser:
         with pdfplumber.open(pdf_path) as pdf:
             page_count = len(pdf.pages)
 
+            if self._is_likely_scanned(pdf):
+                return ParseResult(
+                    doors=[],
+                    column_mapping={},
+                    warnings=[
+                        "This PDF appears to be a scanned image with no selectable text. "
+                        "The parser requires a text-based PDF (e.g. exported directly from "
+                        "CAD or a word processor). Please provide a text-based PDF."
+                    ],
+                    raw_headers=[],
+                    page_count=page_count,
+                    source_file=pdf_path,
+                )
+
             for page_num, page in enumerate(pdf.pages):
-                tables = page.extract_tables()
+                tables = self._extract_tables_with_fallback(page, warnings)
 
                 if not tables:
-                    self._log(f"Page {page_num + 1}: No tables found")
+                    self._log(f"Page {page_num + 1}: No tables found via any strategy")
                     text_rows = self._extract_from_text(page)
                     if text_rows:
                         all_rows.extend(text_rows)
@@ -650,7 +728,7 @@ class DoorScheduleParser:
 
             # Check if this looks like a data row (has door-number-like content in first cell)
             first_cell = str(row[0] or '').strip()
-            if first_cell and re.match(r'^\d{2,4}[A-Za-z]?$', first_cell):
+            if first_cell and re.match(r'^\d{1,5}[A-Za-z]?$|^[A-Za-z]-\d{1,4}$|^[A-Za-z]\d{1,4}$', first_cell):
                 # This looks like a door number — data starts here
                 break
 
@@ -980,15 +1058,23 @@ class DoorScheduleParser:
         if not text:
             return []
 
+        # Covers common door number formats: 1, 101, 101A, A-101, A101
+        _DOOR_NUM_RE = re.compile(
+            r'^\s*(\d{1,5}[A-Za-z]?|[A-Za-z]-\d{1,4}|[A-Za-z]\d{1,4})\s+'
+        )
+
         rows = []
         for line in text.split('\n'):
-            # Look for lines starting with a door number pattern
-            match = re.match(r'^\s*(\d{2,4}[A-Z]?)\s+', line)
-            if match:
-                # Split line by multiple spaces (common in PDF text extraction)
-                parts = re.split(r'\s{2,}', line.strip())
-                if len(parts) >= 3:
-                    rows.append(parts)
+            if not _DOOR_NUM_RE.match(line):
+                continue
+            # Try double-space split first (most reliable for aligned columns)
+            parts = re.split(r'\s{2,}', line.strip())
+            if len(parts) < 2:
+                # Fall back to any whitespace — risk of over-splitting multi-word
+                # cells, but better than dropping the row entirely
+                parts = line.strip().split()
+            if len(parts) >= 2:
+                rows.append(parts)
 
         return rows
 
