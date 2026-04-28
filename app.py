@@ -95,8 +95,10 @@ def parse_schedule():
     filepath = os.path.join(UPLOAD_TEMP, file.filename)
     file.save(filepath)
 
+    debug_mode = request.form.get('debug', 'false').lower() == 'true'
+
     try:
-        parser = DoorScheduleParser()
+        parser = DoorScheduleParser(debug=debug_mode)
         if ext == 'pdf':
             result = parser.parse_pdf(filepath)
         elif ext in ('csv', 'tsv', 'txt'):
@@ -110,7 +112,7 @@ def parse_schedule():
             d['_normalized_material'] = door._normalize_material()
             doors_json.append(d)
 
-        return jsonify({
+        response = {
             "success": True,
             "source": file.filename,
             "door_count": len(result.doors),
@@ -118,7 +120,10 @@ def parse_schedule():
             "column_mapping": result.column_mapping,
             "warnings": result.warnings,
             "doors": doors_json,
-        })
+        }
+        if debug_mode:
+            response["debug_log"] = parser._log_lines
+        return jsonify(response)
 
     except Exception as e:
         return jsonify({"error": f"Parsing failed: {str(e)}"}), 500
