@@ -76,6 +76,25 @@ def serve_static(filename):
 
 
 # ─────────────────────────────────────────────
+# Global error handlers — always return JSON for /api routes
+# ─────────────────────────────────────────────
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "File too large. Maximum upload size is 50 MB."}), 413
+
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"error": f"API endpoint not found: {request.path}"}), 404
+    return send_from_directory('static', 'index.html')
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+# ─────────────────────────────────────────────
 # API: Parse Door Schedule
 # ─────────────────────────────────────────────
 
@@ -93,11 +112,10 @@ def parse_schedule():
         return jsonify({"error": f"Unsupported format: .{ext}. Use PDF, CSV, TSV, or Excel."}), 400
 
     filepath = os.path.join(UPLOAD_TEMP, file.filename)
-    file.save(filepath)
-
     debug_mode = request.form.get('debug', 'false').lower() == 'true'
 
     try:
+        file.save(filepath)
         parser = DoorScheduleParser(debug=debug_mode)
         if ext == 'pdf':
             result = parser.parse_pdf(filepath)
@@ -295,9 +313,9 @@ def parse_hardware():
         return jsonify({"error": "Hardware specification must be a PDF file"}), 400
 
     filepath = os.path.join(UPLOAD_TEMP, file.filename)
-    file.save(filepath)
 
     try:
+        file.save(filepath)
         parser = HardwareScheduleParser()
         result = parser.parse_pdf(filepath)
 
